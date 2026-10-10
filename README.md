@@ -1,5 +1,11 @@
 # TurboPower Object Professional v1.30
 
+This repository is for ongoing work to port the Object Professional development library to Free Pascal so it can be used with Windows and Linux.
+
+It is a wholly separate project from the MS-DOS version as all "MS-DOSisms" will be stubbed out if there's no useful equivalent.
+
+## Original README:
+
 22 years ago, TurboPower Software closed their doors as a retail software company and released all of their development libraries the for Borland/CodeGear/Embarcadero Delphi compiler.  These items were released under a Mozilla 1.1 license.
 
 Here's their original announcement: http://www.turbopower.com/

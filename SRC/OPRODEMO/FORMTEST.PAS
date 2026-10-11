@@ -1,6 +1,6 @@
 {$F+,V-,S-,R-}
 
-{$I OPDEFINE.INC}
+{$I opdefine.inc}
 {*********************************************************}
 {*                  FORMTEST.PAS 1.30                    *}
 {*     An example program for Object Professional 1.0    *}
@@ -24,6 +24,7 @@ program FormTest;
 }
 
 uses
+  OpInline,                  {FPC port: MaxAvail/MemAvail}
   Dos,
   OpString,
   OpConst,    {!!.20}

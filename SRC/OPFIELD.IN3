@@ -307,24 +307,14 @@
 
   function MultiLineField.mfLinePtr(LineNum : Byte) : StringPtr;
     {-Return a pointer to the specified line}
-  var
-    P : Pointer;
-    OSP : OS absolute P;
-  begin
-    P := efEditSt;
-    Inc(OSP.O, Succ(sfFWidth)*Pred(LineNum));
-    mfLinePtr := P;
+    begin
+      mfLinePtr := StringPtr(PtrUInt(efEditSt)+PtrUInt(Succ(sfFWidth)*Pred(LineNum)));
   end;
 
   function MultiLineField.mfOrigLinePtr(LineNum : Byte) : StringPtr;
     {-Return a pointer to the specified line}
-  var
-    P : Pointer;
-    OSP : OS absolute P;
-  begin
-    P := efVarPtr;
-    Inc(OSP.O, Succ(sfFWidth)*Pred(LineNum));
-    mfOrigLinePtr := P;
+    begin
+      mfOrigLinePtr := StringPtr(PtrUInt(efVarPtr)+PtrUInt(Succ(sfFWidth)*Pred(LineNum)));
   end;
 
   procedure MultiLineField.mfDrawOne(St : string;
@@ -583,7 +573,7 @@
       if not Finished then
         if (StRow = 1) and (SP = 0) and LongFlagIsSet(sfOptions, efAutoAdvCurBegin) then
           Finished := True
-        else if (StRow = NumLines) and (SP > EditLen) and LongFlagIsSet(sfOptions, efAutoAdvCurEnd) then
+        else if (StRow = NumLines) and (SP > EditLen) and LongFlagIsSet(sfOptions, efAutoAdvCurEnd) then
           Finished := True;
     end;
 

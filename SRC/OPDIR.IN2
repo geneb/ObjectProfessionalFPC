@@ -75,9 +75,7 @@
     {Change unit code}
     cwUnitCode := ucDir;
 
-    {Downward adjust heap space to use}
-    if diHeapToUse > MaxAvail then  {!!.01}
-      diHeapToUse := MaxAvail;      {!!.01}
+    {FPC port: heap size is limited to a Word, so no MaxAvail clamp is needed}
 
     {Allocate heap space for file list}
     if (diHeapToUse = 0) or not GetMemCheck(diDPtr, diHeapToUse) then begin {!!.01}
@@ -142,12 +140,7 @@
       GotError(epFatal+ecBadParam, emNullError);
       Exit;
     end;
-{$IFDEF Dpmi}                                                           {!!.20}
-    diSPtr := Ptr(OS(diDPtr).S, OS(diDPtr).O+diMaxFiles*SizeOf(DirRec));{!!.20}
-{$ELSE}                                                                 {!!.20}
-    diSPtr := Normalized(Ptr(OS(diDPtr).S,
-                             OS(diDPtr).O+diMaxFiles*SizeOf(DirRec)));
-{$ENDIF}                                                                {!!.20}
+    diSPtr := DispRecPtr(PtrUInt(diDPtr)+PtrUInt(diMaxFiles)*SizeOf(DirRec));
   end;
 
   procedure DirList.AddMaskHeader(FullPath : Boolean;
@@ -185,7 +178,7 @@
   procedure DirList.SetMask(Mask : String; FileAttr : Byte);
     {-Set search mask and attribute}
   begin
-    diMask := StUpcase(Mask);
+    diMask := FsUp(Mask);
     diFileAttr := FileAttr;
     {Must re-read DOS directory next time}
     ResetList;
@@ -256,7 +249,7 @@
   procedure DirList.diSelectDir(Name : FileStr);
     {-Select a new directory}
   begin
-    diCurDir := CompletePath(diCurDir+StUpcase(Name)); {!!.11}
+    diCurDir := CompletePath(diCurDir+FsUp(Name)); {!!.11}
     diMask := diCurDir+JustFileName(diMask);
     ResetList;
     pkResetSearchStr; {!!.10}
@@ -296,13 +289,24 @@
     DRec : DirRec;
   begin
     {Find files}
+{$IFDEF UNIX}
+    { FPC port: on Unix '*.*' would miss names without a dot }
+    if (Length(SearchString) >= 3) and
+       (Copy(SearchString, Length(SearchString)-2, 3) = '*.*') then
+      Delete(SearchString, Length(SearchString)-1, 2);
+{$ENDIF}
     FindFirst(SearchString, FileAttr, SRec);
 
     while DosError = 0 do begin
       {Accept only directories or non-directories}
       if (SRec.Attr and Directory) = (FileAttr and Directory) then begin
         {Transfer to a DirRec}
-        move(SRec.Attr, DRec, SizeOf(DirRec));
+        { FPC port: explicit copy; the DOS SearchRec layout is not portable.
+          Long names are truncated to 12 characters (FileStr). }
+        DRec.Attr := SRec.Attr;
+        DRec.Time := SRec.Time;
+        DRec.Size := SRec.Size;
+        DRec.Name := Copy(SRec.Name, 1, 12);
         if ByteFlagIsSet(DRec.Attr, Directory) then
           ForceUpcase := FlagIsSet(diFlags, diDirsUpcase)
         else
@@ -348,7 +352,7 @@
     I : Word;
     DRec : DirRec;
   begin
-    if Length(diCurDir) > 3 then begin
+    if Length(diCurDir) > RootLen then begin
       {Not in the root directory}
       for I := 1 to diCurFiles do
         if diDPtr^[I].Name = '..' then
@@ -734,7 +738,7 @@
       if GetLastCommand = ChangeCode then begin
         {Trim off trailing backslash}
         Mask := diCurDir;
-        if (Length(Mask) > 3) and (Mask[Length(Mask)] = '\') then
+        if (Length(Mask) > RootLen) and IsDirSep(Mask[Length(Mask)]) then
           dec(Mask[0]);
         {Change to directory}
         ChDir(Mask);
@@ -1036,7 +1040,7 @@ ExitPoint:
     if (diDPtr = nil) or (N < 1) or (N > diCurFiles) then
       GetMultiFile := ''
     else
-      GetMultiFile := StUpcase(diDPtr^[N].Name);
+      GetMultiFile := FsUp(diDPtr^[N].Name);
   end;
 
   function DirList.GetMultiPath(N : Word) : PathStr;
@@ -1050,7 +1054,7 @@ ExitPoint:
     else if (diDPtr^[N].Attr = diDriveAttr) and FlagIsSet(diFlags, diShowDrives) then
       GetMultiPath := S
     else
-      GetMultiPath := StUpcase(diCurDir+S);
+      GetMultiPath := FsUp(diCurDir+S);
   end;
 
   procedure DirList.GetMultiDirRec(N : Word; var D : DirRec);

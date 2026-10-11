@@ -1,12 +1,12 @@
 
-{$IFDEF Windows}                                                      {!!.20}
+{$IFDEF OPWinTP}                                                      {!!.20}
   !! ERROR: This unit is not compatible with Windows applications !!  {!!.20}
 {$ENDIF}                                                              {!!.20}
 
 {$S-,R-,V-,I-,B-,F+,O+,A-}
 
 {Conditional defines that may affect this unit}
-{$I OPDEFINE.INC}
+{$I opdefine.inc}
 
 {*********************************************************}
 {*                  OPASCIIZ.PAS 1.30                    *}
@@ -36,20 +36,9 @@ function Asc2Str(var A : Asciiz) : string;
 procedure Str2Asc(S : string; var A : Asciiz);
   {-Convert a Turbo string into an Asciiz}
 
-function LenAsc(A : Asciiz) : Word;
+function LenAsc(const A : Asciiz) : Word;
   {-Return the length of an Asciiz string}
-  inline
-  ($5F/                      {pop  di       ;get pointer to ASCIIZ}
-    $07/                     {pop  es       ; into es:di}
-    $89/$FB/                 {mov  bx,di    ;store initial offset}
-    $B9/$FF/$FF/             {mov  cx,$FFFF ;check maximum length}
-    $B0/$00/                 {mov  al,0     ;look for null}
-    $FC/                     {cld           ;forward direction}
-    $F2/                     {repne}
-    $AE/                     {scasb         ;scan while equal}
-    $29/$DF/                 {sub  di,bx    ;get the number of bytes scanned}
-    $89/$F8/                 {mov  ax,di    ;return in ax}
-    $48);                    {dec  ax       ;null doesn't count}
+  {FPC port: former inline macro; A is now passed by reference (const)}
 
 procedure CopyAsc(var A : Asciiz; Start, Len : Word; var O : Asciiz);
   {-Return a substring of a. Note start=0 for first char in a}
@@ -141,6 +130,16 @@ implementation
 
 const
   Null = #0;
+
+  function LenAsc(const A : Asciiz) : Word;
+  var
+    N : Word;
+  begin
+    N := 0;
+    while (N < MaxAsciiz) and (A[N] <> Null) do
+      Inc(N);
+    LenAsc := N;
+  end;
 
   function Asc2Str(var A : Asciiz) : string;
     {-Convert ASCIIZ to Turbo string, truncating if longer than 255 chars}
@@ -321,13 +320,91 @@ const
       A[MaxAsciiz] := Null;
   end;
 
-  {$L OPASCIIZ.OBJ}
-  function Search(var Buffer; BufLength : Word; var Match; MatLength : Word) : Word;
-    external;
-  procedure AscUpcase(var A, B : Asciiz); external;
-  procedure AscLocase(var A, B : Asciiz); external;
-  function CompAsc(var a1, a2 : Asciiz) : AscCompareType; external;
-  function CompUCAsc(var a1, a2 : Asciiz) : AscCompareType; external;
+  {FPC port: Search is OpString.Search; the assembler routines below were
+   ported to Pascal}
+  procedure AscUpcase(var A, B : Asciiz);
+    {-Uppercase the Asciiz in a, returning b}
+  var
+    I : Word;
+  begin
+    I := 0;
+    while A[I] <> Null do begin
+      B[I] := Upcase(A[I]);
+      Inc(I);
+    end;
+    B[I] := Null;
+  end;
+
+  procedure AscLocase(var A, B : Asciiz);
+    {-Lowercase the Asciiz in a, returning b}
+  var
+    I : Word;
+  begin
+    I := 0;
+    while A[I] <> Null do begin
+      B[I] := LoCase(A[I]);
+      Inc(I);
+    end;
+    B[I] := Null;
+  end;
+
+  function CompAsc(var a1, a2 : Asciiz) : AscCompareType;
+    {-Return less, equal, greater if a1<a2, a1=a2, or a1>a2}
+  var
+    I : LongInt;
+    L1, L2, N : Word;
+  begin
+    L1 := LenAsc(a1);
+    L2 := LenAsc(a2);
+    N := L1;
+    if L2 < N then
+      N := L2;
+    for I := 0 to LongInt(N)-1 do
+      if a1[I] <> a2[I] then begin
+        if a1[I] < a2[I] then
+          CompAsc := AscLess
+        else
+          CompAsc := AscGreater;
+        Exit;
+      end;
+    if L1 = L2 then
+      CompAsc := AscEqual
+    else if L1 < L2 then
+      CompAsc := AscLess
+    else
+      CompAsc := AscGreater;
+  end;
+
+  function CompUCAsc(var a1, a2 : Asciiz) : AscCompareType;
+    {-Compare two Asciizs in a case insensitive manner}
+  var
+    I : LongInt;
+    L1, L2, N : Word;
+    C1, C2 : Char;
+  begin
+    L1 := LenAsc(a1);
+    L2 := LenAsc(a2);
+    N := L1;
+    if L2 < N then
+      N := L2;
+    for I := 0 to LongInt(N)-1 do begin
+      C1 := Upcase(a1[I]);
+      C2 := Upcase(a2[I]);
+      if C1 <> C2 then begin
+        if C1 < C2 then
+          CompUCAsc := AscLess
+        else
+          CompUCAsc := AscGreater;
+        Exit;
+      end;
+    end;
+    if L1 = L2 then
+      CompUCAsc := AscEqual
+    else if L1 < L2 then
+      CompUCAsc := AscLess
+    else
+      CompUCAsc := AscGreater;
+  end;
 
   function PosStr(Obj : string; var A : Asciiz) : Word;
     {-Return the position of the string obj in a, returning NotFound if not found}
@@ -348,12 +425,9 @@ const
     P : AsciizPtr;
   begin
     alen := Succ(LenAsc(A));
-    if MaxAvail >= alen then begin
-      GetMem(P, alen);
-      MoveFast(A, P^, alen);  {!!.01}
-      AscToHeap := P;
-    end else
-      AscToHeap := nil;
+    GetMem(P, alen);
+    MoveFast(A, P^, alen);  {!!.01}
+    AscToHeap := P;
   end;
 
   procedure AscFromHeap(P : AsciizPtr; var A : Asciiz);
@@ -490,143 +564,53 @@ const
     AscCenterCh(A, ' ', Width, B);
   end;
 
-type
-  {text buffer}
-  TextBuffer = array[0..65520] of Byte;
-
-  {structure of a Turbo File Interface Block}
-  FIB = record
-          Handle : Word;
-          Mode : Word;
-          BufSize : Word;
-          Private : Word;
-          BufPos : Word;
-          BufEnd : Word;
-          BufPtr : ^TextBuffer;
-          OpenProc : Pointer;
-          InOutProc : Pointer;
-          FlushProc : Pointer;
-          CloseProc : Pointer;
-          UserData : array[1..16] of Byte;
-          Name : array[0..79] of Char;
-          Buffer : array[0..127] of Char;
-        end;
-
-const
-  FMClosed = $D7B0;
-  FMInput = $D7B1;
-  FMOutput = $D7B2;
-  FMInOut = $D7B3;
-  CR : Char = ^M;
-
   function ReadLnAsc(var F : Text; var A : Asciiz) : Boolean;
     {-Read an Asciiz from text file, returning true if successful}
+    {FPC port: the Turbo Pascal text-buffer (FIB) scanning was replaced by
+     Read/Eoln/ReadLn, which accept CR, LF and CR/LF line ends.  Characters
+     beyond MaxAsciiz are discarded, as before.}
   var
-    CrPos : Word;
     alen : Word;
-    blen : Word;
+    Ch : Char;
+    Stripped : Boolean;
+  begin
+    alen := 0;
+    ReadLnAsc := False;
 
-    function RefillBuf(var F : Text) : Boolean;
-      {-Refill buffer}
-    var
-      Ch : Char;
-    begin
-      with FIB(F) do begin
-        BufEnd := 0;
-        BufPos := 0;
-        Read(F, Ch);
-        if IoResult <> 0 then begin
-          {Couldn't read from file}
-          RefillBuf := False;
-          Exit;
-        end;
-        {Reset the buffer again}
-        BufPos := 0;
-        RefillBuf := True;
+    {Make sure file open for input}
+    if TextRec(F).Mode <> fmInput then
+      Exit;
+
+    {Nothing left to read}
+    if Eof(F) then
+      Exit;
+
+    while not Eoln(F) do begin
+      Read(F, Ch);
+      if IoResult <> 0 then
+        Exit;
+      if alen < MaxAsciiz then begin
+        A[alen] := Ch;
+        Inc(alen);
       end;
     end;
+    ReadLn(F);
+    if IoResult <> 0 then
+      Exit;
 
+    {Remove trailing ^Z at end of file}
+    Stripped := False;
+    if Eof(F) then
+      while (alen > 0) and (A[Pred(alen)] = ^Z) do begin
+        Dec(alen);
+        Stripped := True;
+      end;
+    if Stripped and (alen = 0) then
+      Exit;
 
-  begin
-    with FIB(F) do begin
-
-      {Initialize the Asciiz length and function result}
-      alen := 0;
-      ReadLnAsc := False;
-
-      {Make sure file open for input}
-      if Mode <> FMInput then
-        Exit;
-
-      {Make sure something is in buffer}
-      if BufPos >= BufEnd then
-        if not(RefillBuf(F)) then
-          Exit;
-
-      {Use the Turbo text file buffer to build the Asciiz}
-      repeat
-
-        {Search for the next carriage return in the file buffer}
-        CrPos := Search(BufPtr^[BufPos], {Succ}(BufEnd-BufPos), CR, 1); {!!.03}
-
-        if CrPos = $FFFF then begin
-          {CR not found, save the portion of the buffer seen so far}
-          blen := BufEnd-BufPos;
-          if alen+blen > MaxAsciiz then
-            blen := MaxAsciiz-alen;
-
-          MoveFast(BufPtr^[BufPos], A[alen], blen);  {!!.01}
-          Inc(alen, blen);
-
-          {See if at end of file}
-          if eof(F) then begin
-            {Remove trailing ^Z}
-            while (alen > 0) and (A[Pred(alen)] = ^Z) do
-              Dec(alen);
-            if alen = 0 then
-              {Exit with error if all the file has been read}
-              Exit
-            else
-              {Exit successfully for last line}
-              CrPos := 0;
-          end else if not(RefillBuf(F)) then
-            Exit;
-
-        end else begin
-          {Save up to the CR}
-          blen := CrPos;
-          if alen+blen > MaxAsciiz then
-            blen := MaxAsciiz-alen;
-          MoveFast(BufPtr^[BufPos], A[alen], blen);  {!!.01}
-          Inc(alen, blen);
-
-          {Inform Turbo we used the characters}
-          Inc(BufPos, Succ(CrPos));
-
-          {Skip over following ^J}
-          if BufPos < BufEnd then begin
-            {Next character is within current buffer}
-            if BufPtr^[BufPos] = Ord(^J) then
-              Inc(BufPos);
-          end else begin
-            {Next character is not within current buffer}
-            {Refill the buffer}
-            if not(RefillBuf(F)) then
-              Exit;
-            if BufPos < BufEnd then
-              if BufPtr^[BufPos] = Ord(^J) then
-                Inc(BufPos);
-          end;
-
-        end;
-
-      until (CrPos <> $FFFF) or (alen > MaxAsciiz);
-
-      {Return success and terminate the Asciiz}
-      ReadLnAsc := True;
-      A[alen] := Null;
-
-    end;
+    {Return success and terminate the Asciiz}
+    ReadLnAsc := True;
+    A[alen] := Null;
   end;
 
   function WriteAsc(var F : Text; var A : Asciiz) : Boolean;

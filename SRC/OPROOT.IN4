@@ -425,7 +425,8 @@
     {-Pack the OpLibrary}
   var
     WorkName : PathStr;
-    I, OldH, NewH : Word;
+    I : Word;
+    OldH, NewH : THandle;
 
     procedure MakeAsciiz(var FName : PathStr);
       {-Make FName an ASCIIZ string}
@@ -453,37 +454,19 @@
 
     procedure RenameFile(OldName, NewName : PathStr);
       {-Rename OldName to NewName}
-    var
-      Regs : Registers;
     begin
       MakeAsciiz(OldName);
       MakeAsciiz(NewName);
-      with Regs do begin
-        AH := $56;
-        DS := Seg(OldName);
-        DX := Ofs(OldName);
-        ES := Seg(NewName);
-        DI := Ofs(NewName);
-        MsDos(Regs);
-        if Odd(Flags) then
-          Error(epFatal+AX);
-      end;
+      if not SysUtils.RenameFile(StrPas(PChar(@OldName)), StrPas(PChar(@NewName))) then
+        Error(epFatal+5);
     end;
 
     procedure EraseFile(FName : PathStr);
       {-Erase the specified file}
-    var
-      Regs : Registers;
     begin
       MakeAsciiz(FName);
-      with Regs do begin
-        AH := $41;
-        DS := Seg(FName);
-        DX := Ofs(FName);
-        MsDos(Regs);
-        if Odd(Flags) then
-          Error(epFatal+AX);
-      end;
+      if not SysUtils.DeleteFile(StrPas(PChar(@FName))) then
+        Error(epFatal+2);
     end;
 
     procedure CopyEntry(N : Word);
@@ -913,16 +896,10 @@
     {register the directory entry type}
     RegisterEntryType;
 
-    for N := 1 to mlEntries do begin
-      {get pointer to N'th entry}
-      DEP := GetDirEntryPtr(N);
-
-      {point to the word just before it}
-      Dec( OS(DEP).O, 2 );
-
-      {initialize the VMT offset}
-      InitEntry(DEP^);
-    end;
+    {FPC port: stubbed because the original patched a 2-byte VMT word into the
+     library image in place, which cannot hold a real VMT pointer; in-memory
+     libraries are therefore not available}
+    Error(epFatal+ecIdNotRegistered);
 
     if PeekStatus <> 0 then begin
       InitStatus := PeekStatus;  {!!.03}
@@ -944,18 +921,6 @@
     SRP : ^StreamRec absolute DEP;
     N : Word;
   begin
-    for N := 1 to mlEntries do begin
-      {get pointer to N'th entry}
-      DEP := GetDirEntryPtr(N);
-
-      {point to the word just before it}
-      Dec( OS(DEP).O, 2 );
-
-      {uninitialize the VMT offset}
-      with SRP^ do
-        if VMT = Ofs(TypeOf(DirEntry)^) then
-          Ver := veDirEntry;
-    end;
     MemIdStream.Done;
   end;
 
@@ -1070,8 +1035,8 @@
   begin
     with StRec do
       if (Code = otDirEntry) and (Ver = veDirEntry) then begin
-        P := TypeOf(DirEntry);
-        VMT := OS(P).O;
+        {FPC port: VMT patching removed, see MemOpLibrary.Init}
+        VMT := 0;
       end
       else
         Error(epFatal+ecIdNotRegistered);
@@ -1085,8 +1050,7 @@
     {point to start of library}
     P := MPtr;
 
-    with OS(P) do
-      Inc(O, mlDirStart+((N-1)*mlEntrySize)+2);
+    P := Pointer(PtrUInt(P)+PtrUInt(mlDirStart+((N-1)*mlEntrySize)+2));
     {        ^            ^                 ^ extra word before the VMT
              ^            ^ start of N'th entry
              ^ skip OpLibrary header

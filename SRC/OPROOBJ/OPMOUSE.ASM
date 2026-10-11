@@ -326,4 +326,3 @@ RestoreMouseStatePrim   ENDP
 
 CODE    ENDS
         END
-

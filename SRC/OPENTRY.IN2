@@ -1152,21 +1152,22 @@ Restart:
     {-Fix up one user variable pointer}
   var
     IP : IdNodePtr;
-    MinO, MaxO : Word;
+    A, RecA : PtrUInt;
   begin
     esFixOneUserVar := False;
     if EFP = nil then
       Exit;
 
-    with EFP^, OS(efVarPtr) do begin
+    { FPC port: the "segment" is the high word and the "offset" the low word
+      of a 32-bit value held in the pointer slot }
+    with EFP^ do begin
+      A := PtrUInt(efVarPtr);
+      RecA := PtrUInt(esUserRecPtr);
       {is the variable within the user record?}
-      MinO := OS(esUserRecPtr).O;
-      MaxO := MinO+esUserRecSize-1;
       if (esUserRecPtr <> nil) and (esUserRecSize > 0) and
-              (S = OS(esUserRecPtr).S) and (O >= MinO) and (O <= MaxO) then begin
+         (A >= RecA) and (A <= RecA+esUserRecSize-1) then begin
         {store ptEntryUserRec as the segment, and adjust the offset}
-        S := ptEntryUserRec;
-        Dec(O, MinO);
+        efVarPtr := Pointer((PtrUInt(ptEntryUserRec) shl 16) or ((A-RecA) and $FFFF));
       end
       else begin
         {is the variable's address registered?}
@@ -1175,8 +1176,7 @@ Restart:
           Exit
         else with IP^ do begin
           {store the id code in the segment, the version in the offset}
-          S := idCode;
-          O := idVer;
+          efVarPtr := Pointer((PtrUInt(idCode) shl 16) or idVer);
         end;
       end;
     end;
@@ -1209,21 +1209,21 @@ Restart:
     if EFP = nil then
       Exit;
 
-    with EFP^, OS(efVarPtr) do
-      {segment has the type code}
-      if S = ptEntryUserRec then
+    with EFP^ do
+      {segment (high word) has the type code}
+      if Word(PtrUInt(efVarPtr) shr 16) = ptEntryUserRec then
         {a code of ptEntryUserRec means it's part of the user record}
         if esUserRecPtr = nil then
           {no user record set up}
           Exit
         else begin
           {offset is relative to start of user record}
-          S := OS(esUserRecPtr).S;
-          Inc(O, OS(esUserRecPtr).O);
+          efVarPtr := Pointer(PtrUInt(esUserRecPtr)+(PtrUInt(efVarPtr) and $FFFF));
         end
       else begin
         {segment has the code, offset has the version}
-        IP := IdS.idRegistered.FindByCodeVer(S, O);
+        IP := IdS.idRegistered.FindByCodeVer(Word(PtrUInt(efVarPtr) shr 16),
+                                             Word(PtrUInt(efVarPtr)));
         if IP = nil then
           Exit
         else

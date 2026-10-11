@@ -1,4 +1,4 @@
-{$IFDEF Windows}
+{$IFDEF OPWinTP}
   !! ERROR - This program is not compatible with Windows !!
 {$ENDIF}
 
@@ -13,7 +13,7 @@
 {*                 All rights reserved.                  *}
 {*********************************************************}
 
-{$I OPDEFINE.INC}
+{$I opdefine.inc}
 
 {***************************************************************************
  This program requires that OPDEFINE.INC activate the following defines:
@@ -57,8 +57,8 @@ uses
   OpEntry;
 
 const
-  SliderChar       = '²';
-  ScrollBarChar    = '°';
+  SliderChar       = #$B2;
+  ScrollBarChar    = #$B0;
   OurColorSet : ColorSet = (
     TextColor       : $1B; TextMono       : $07;
     CtrlColor       : $5F; CtrlMono       : $70;
@@ -331,8 +331,7 @@ const
 
   function DragKeyPressed : Boolean;
   begin
-    {make sure TSR's can pop up}
-    inline($CD/$28);
+    {FPC port: INT 28h (let TSRs pop up) has no equivalent; omitted}
     UpdateClock;
     DragKeyPressed := OpCrt.KeyPressed;
   end;
@@ -341,8 +340,7 @@ const
     {-Display current date and time while waiting for keypress}
   begin
     while not EntryCommands.cpKeyPressed do begin
-      {make sure TSR's can pop up}
-      inline($CD/$28);
+      {FPC port: INT 28h (let TSRs pop up) has no equivalent; omitted}
       UpdateClock;
     end;
     GetKey := EntryCommands.cpGetKey;
@@ -359,8 +357,7 @@ const
     {$ELSE}
     while not KeyPressed do begin
     {$ENDIF}
-      {make sure TSR's can pop up}
-      inline($CD/$28);
+      {FPC port: INT 28h (let TSRs pop up) has no equivalent; omitted}
 
       {display the current date and time}
       with OurColorSet do
@@ -674,7 +671,7 @@ const
       for I := Row to Row+4 do
         FastFill(80, ' ', I, 1, FA);
       FrameWindow(1, Row, 80, Row+4, FA, FA, '');
-      FastWrite('Ã'+CharStr('Ä', 78)+'´', Row+2, 1, FA);
+      FastWrite(#$C3+CharStr(#$C4, 78)+#$B4, Row+2, 1, FA);
     end;
 
   begin

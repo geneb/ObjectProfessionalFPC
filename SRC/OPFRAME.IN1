@@ -24,8 +24,8 @@
     {-Save window contents}
   var
     WordsPerRow : Word;
-    SrcPos : Word;
-    DestPos : Word;
+    SrcPos : LongInt;
+    DestPos : LongInt;
     Row : Word;
     WordsToMove : Word; {!!.11}
     Rows : Word;        {!!.11}
@@ -42,7 +42,7 @@
     SrcPos := Word(2)*(OpCrt.VirtualWidth*(Y1-1)+(X1-1));
     DestPos := 0;
     for Row := 1 to Rows do begin  {!!.11}
-      MoveScreen(Mem[OpCrt.VirtualSegment:SrcPos], BufPtr^[DestPos], WordsToMove); {!!.11}
+      MoveScreen(PByte(PtrUInt(OpCrt.VirtualBuffer)+SrcPos)^, BufPtr^[DestPos], WordsToMove); {!!.11}
       Inc(SrcPos, Word(2)*OpCrt.VirtualWidth);
       Inc(DestPos, Word(2)*WordsPerRow);
     end;
@@ -52,8 +52,8 @@
     {-Restore window contents}
   var
     WordsPerRow : Word;
-    SrcPos : Word;
-    DestPos : Word;
+    SrcPos : LongInt;
+    DestPos : LongInt;
     Row : Word;
     WordsToMove : Word; {!!.11}
     Rows : Word;        {!!.11}
@@ -70,7 +70,7 @@
     SrcPos := Word(2)*(OpCrt.VirtualWidth*(Y1-1)+(X1-1));
     DestPos := 0;
     for Row := 1 to Rows do begin {!!.11}
-      MoveScreen(BufPtr^[DestPos], Mem[OpCrt.VirtualSegment:SrcPos], WordsToMove); {!!.11}
+      MoveScreen(BufPtr^[DestPos], PByte(PtrUInt(OpCrt.VirtualBuffer)+SrcPos)^, WordsToMove); {!!.11}
       Inc(SrcPos, Word(2)*OpCrt.VirtualWidth);
       Inc(DestPos, Word(2)*WordsPerRow);
     end;
@@ -317,8 +317,8 @@
   var
     fBPR : Word;
     cBPR : Word;
-    fOfs : Word;
-    cOfs : Word;
+    fOfs : LongInt;
+    cOfs : LongInt;
     R : Byte;
     {$IFDEF UseMouse}
     MOn : Boolean;
@@ -341,7 +341,7 @@
     {$ENDIF}
     {Restore row by row}
     for R := Y1 to Y2 do begin
-      MoveScreen(srBufPtr^[fOfs], MemW[OpCrt.VirtualSegment:cOfs], cBPR);
+      MoveScreen(srBufPtr^[fOfs], PByte(PtrUInt(OpCrt.VirtualBuffer)+cOfs)^, cBPR);
       Inc(fOfs, fBPR);
       Inc(cOfs, Word(2)*OpCrt.VirtualWidth);
     end;

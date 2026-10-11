@@ -13,7 +13,7 @@
 {*                 All rights reserved.                  *}
 {*********************************************************}
 
-{$I OPDEFINE.INC} {!!.20}
+{$I opdefine.inc} {!!.20}
 
 {***************************************************************************
  This program will use features activated with the following defines:
@@ -32,6 +32,7 @@ program PTime;
 
 uses
   Dos,                       {standard DOS/BIOS routines}
+  OpInline,
   OpString,                  {Object Professional string handling routines}
   OpCrt,                     {Object Professional CRT unit}
   OpCmd,
@@ -265,68 +266,21 @@ var
   end;
 
   procedure GetCurrentTime(var TR : TimeRec);
-  {-Mystic assembly language routine to calculate current time fast.
-    Based on routine by Bob Tolz.}
+  {-Calculate current time.  FPC port: uses Dos.GetTime instead of the
+    BIOS tick count inline routine.}
+  var
+    H, M, S, S100 : Word;
   begin
-    inline(
-      $B8/$40/$00/           {mov  ax,$40      ;read time from BIOS data area}
-      $8E/$C0/               {mov  es,ax       ;INT $1A clears midnight flag!}
-      $26/$8B/$0E/>$6E/      {mov  cx,es:[$6E]}
-      $26/$8B/$16/>$6C/      {mov  dx,es:[$6C]}
-      $89/$C8/               {mov ax,cx        ;magically calculate the time}
-      $89/$D3/               {mov bx,dx}
-      $D1/$E2/               {shl dx,1}
-      $D1/$D1/               {rcl cx,1}
-      $D1/$E2/               {shl dx,1}
-      $D1/$D1/               {rcl cx,1}
-      $01/$DA/               {add dx,bx}
-      $11/$C8/               {adc ax,cx}
-      $92/                   {xchg dx,ax}
-      $B9/$0B/$E9/           {mov cx,$E90B}
-      $F7/$F1/               {div cx}
-      $89/$C3/               {mov bx,ax}
-      $31/$C0/               {xor ax,ax}
-      $F7/$F1/               {div cx}
-      $89/$DA/               {mov dx,bx}
-      $B9/$C8/$00/           {mov cx,200}
-      $F7/$F1/               {div cx}
-      $80/$FA/$64/           {cmp dl,100}
-      $72/$03/               {jb Under}
-      $80/$EA/$64/           {sub dl,100}
-      {Under:}
-      $F5/                   {cmc}
-      $88/$D3/               {mov bl,dl}
-      $D1/$D0/               {rcl ax,1}
-      $B2/$00/               {mov dl,0}
-      $D1/$D2/               {rcl dx,1}
-      $B9/$3C/$00/           {mov cx,60}
-      $F7/$F1/               {div cx}
-      $88/$D7/               {mov bh,dl}
-      $F6/$F1/               {div cl}
-      $86/$E0/               {xchg al,ah}
-      $C4/$7E/<TR/           {les di,[bp+<TR]  ;ES:DI => time rec}
-      $26/$88/$25/           {mov es:[di],ah   ;AH has hours}
-      $26/$88/$45/$01/       {mov es:[di+1],al ;AL has minutes}
-      $26/$88/$7D/$02);      {mov es:[di+2],bh ;BH has seconds (hundredths in BL)}
+    GetTime(H, M, S, S100);
+    TR.Hours := H;
+    TR.Minutes := M;
+    TR.Seconds := S;
   end;
 
   procedure SetBiosClock;
     {-Set BIOS clock to match DOS's.}
-  const
-    TicsPerHr = 65543.3333;
-    TicsPerMin = 1092.3889;
-    TicsPerSec = 18.2065;
-    TicsPerHun = 0.182065;
-  var
-    BiosClock : LongInt absolute $40 : $6C;
-    Regs : Registers;
   begin
-    with Regs do begin
-      AH := $2C;
-      MsDos(Regs);
-      BiosClock :=
-      Trunc((Ch*TicsPerHr)+(CL*TicsPerMin)+(DH*TicsPerSec)+(DL*TicsPerHun));
-    end;
+    {FPC port: stubbed because the BIOS data area clock cannot be written}
   end;
 
   procedure GetElapsedTime(Start, Stop : DateTimeRec; var Elapsed : Time);
@@ -416,8 +370,7 @@ var
     {-Update the screen while waiting for a keystroke}
   begin
     while not KeyPressed do begin
-      {make sure other TSRs can pop up}
-      inline($CD/$28);
+      {FPC port: INT 28h (let TSRs pop up) has no equivalent; omitted}
       UpdateTimes;
     end;
     GetKey := ReadKeyWord;
@@ -1238,7 +1191,7 @@ begin
     Abort(ClockErrorMsg);
 
   {go resident}
-  if DefinePop(OurHotKey, PopupEntryPoint, Ptr(SSeg, SPtr), True) then begin
+  if DefinePop(OurHotKey, PopupEntryPoint, nil {FPC port: no stack pointer}, True) then begin
     WriteLn('PTIME loaded, press Ctrl-RightShift-T to activate.');
 
     {Enable popups}

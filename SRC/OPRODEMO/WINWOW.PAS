@@ -7,7 +7,7 @@
 {*                 All rights reserved.                  *}
 {*********************************************************}
 
-{$I OPDEFINE.INC}
+{$I opdefine.inc}
 
 {***************************************************************************
  This program requires that OPDEFINE.INC activate the following defines:
@@ -50,8 +50,8 @@ const
   RandUFttr = $07;           {Unselected frame attribute for random windows}
   RandUHttr = $07;           {Unselected header attribute for random windows}
 
-  ActiveFr : FrameArray = 'ÉÈ»¼ÍÍºº';
-  InActiFr : FrameArray = 'ÚÀ¿ÙÄÄ³³';
+  ActiveFr : FrameArray = #$C9#$C8#$BB#$BC#$CD#$CD#$BA#$BA;
+  InActiFr : FrameArray = #$DA#$C0#$BF#$D9#$C4#$C4#$B3#$B3;
 
 var
   Main : WindowPtr;

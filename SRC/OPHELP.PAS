@@ -1,7 +1,7 @@
 {$S-,R-,V-,I-,B-,F+,O+,A-}
 
 {Conditional defines that may affect this unit}
-{$I OPDEFINE.INC}
+{$I opdefine.inc}
 
 {*********************************************************}
 {*                    OPHELP.PAS 1.30                    *}
@@ -12,7 +12,7 @@
 unit OpHelp;
   {-General purpose help facility}
 
-{$IFDEF Windows}                                                      {!!.20}
+{$IFDEF OPWinTP}                                                      {!!.20}
   !! ERROR: This unit is not compatible with Windows applications !!  {!!.20}
 {$ENDIF}                                                              {!!.20}
 
@@ -37,7 +37,7 @@ uses
   {$ENDIF}
   OpPick;
 
-  {$I OPHELP.ICD}  {configuration data}
+  {$I ophelp.icd}  {configuration data}
 
   {.F-}
 const
@@ -89,7 +89,7 @@ const
 
   {Synonym definitions}
   HelpId : array[0..3] of Char = 'OPH1'; {Identifier at start of help file}
-  NoHelpAvailable = $FFFFFFFF;{No help is available for topic}
+  NoHelpAvailable = -1;      {No help is available for topic; FPC port: was $FFFFFFFF, LongInt compare}
   NoTopicName     = $FFFF;    {No topic name for this topic}
   XrefForIndex    = 0;        {Special xref denotes help index}
   PickTopic       = 0;        {Special topic number brings up pick list}
@@ -709,9 +709,9 @@ var
 
 implementation
 
-  {$I OPHELP.IN1}           {Raw help window}
-  {$I OPHELP.IN2}           {Paged help window}
-  {$I OPHELP.IN3}           {Scrolled help window}
+  {$I ophelp.in1}           {Raw help window}
+  {$I ophelp.in2}           {Paged help window}
+  {$I ophelp.in3}           {Scrolled help window}
 
 begin
   {initialize command processor}

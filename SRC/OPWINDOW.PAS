@@ -1,11 +1,11 @@
-{$IFDEF Windows}                                                      {!!.20}
+{$IFDEF OPWinTP}                                                      {!!.20}
   !! ERROR: This unit is not compatible with Windows applications !!  {!!.20}
 {$ENDIF}                                                              {!!.20}
 
 {$S-,R-,V-,I-,B-,F+,O+,A-}
 
 {Conditional defines that may affect this unit}
-{$I OPDEFINE.INC}
+{$I opdefine.inc}
 
 
 {*********************************************************}
@@ -54,7 +54,7 @@ const
   wHasChildren      = $10000000;  {Window has children (in stream)} {!!.01}
   wIsChild          = $20000000;  {Window is a child of another}    {!!.01}
   wZoomed           = $40000000;  {Window is zoomed}
-  wActive           = $80000000;  {Window is on-screen}
+  wActive           = -$7FFFFFFF-1; {=$80000000, FPC port: LongInt sign bit} {Window is on-screen}
 
   DefWindowOptions  : LongInt =    {Settings when window initialized}
     wClear+wSaveContents+wResizeable+wStoreContents;
@@ -753,17 +753,20 @@ type
     object(Root)                  {A virtual screen}
       vsWidth       : Word;       {Width of virtual screen}
       vsHeight      : Word;       {Height of virtual screen}
-      vsVideoSeg    : Word;       {Segment for this virtual screen}
+      vsVideoSeg    : Word;       {Legacy; unused in FPC port, see vsVideoPtr}
       vsSize        : Word;       {Usable bytes in buffer}
       vsBufPtr      : Pointer;    {Pointer to buffer}
       vsAllocated   : Boolean;    {True if VirtScreen allocated buffer}
       vsSaveSeg     : Word;       {Virtual segment when activated}
       vsSaveWidth   : Word;       {Virtual width when activated}
       vsSaveHeight  : Word;       {Virtual height when activated}
+      {FPC port: pointers replace the segments, not stored in streams}
+      vsVideoPtr    : Pointer;    {Buffer for this virtual screen}
+      vsSavePtr     : Pointer;    {Virtual buffer when activated}
 
       constructor Alloc(Height, Width : Word);
         {-Create a virtual screen of the specified dimensions}
-      constructor Init(Height, Width : Word; BufSeg : Word);
+      constructor Init(Height, Width : Word; BufPtr : Pointer);
         {-Initialize a virtual screen with a preallocated buffer}
       destructor Done; virtual;
         {-Deallocate a virtual screen}
@@ -937,7 +940,8 @@ const
   wStack            : WindowStack =  {Stack of active windows}
     (psTop:0; psSize:0; psStatus:0; psBase:nil;
      wsScreen:(vsWidth:0; vsHeight:0; vsVideoSeg:0;
-               vsSize:0; vsBufPtr:nil; vsAllocated:False);
+               vsSize:0; vsBufPtr:nil; vsAllocated:False;
+               vsVideoPtr:nil; vsSavePtr:nil);
      wsLevel:0;
      wsFlags:wsOptimizeTile); {!!.03}
 
@@ -988,10 +992,10 @@ const
 
 implementation
 
-  {$I OPWINDOW.IN1}
-  {$I OPWINDOW.IN2}
-  {$I OPWINDOW.IN3}
-  {$I OPWINDOW.IN4} {!!.13}
+  {$I opwindow.in1}
+  {$I opwindow.in2}
+  {$I opwindow.in3}
+  {$I opwindow.in4} {!!.13}
 
 {$IFDEF InitAllUnits}
 begin

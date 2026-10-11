@@ -479,9 +479,9 @@
                 Ch := Char(Byte('0')+((C div 10) mod 10))
               else
                 Ch := #7;
-          5 : Ch := 'ù';
+          5 : Ch := #$F9;
           else
-            Ch := 'ú';
+            Ch := #$FA;
         end;
         FastText(Ch, R, C);
       end;
@@ -1333,11 +1333,11 @@
     StatusForm1 : string[80] =
     {         1         2         3         4         5         6         7         8}
     {12345678901234567890123456789012345678901234567890123456789012345678901234567890}
-    '<Enter> Edit  <AltT> Test  <F2> Save  <F10> Menu ³ N             Row x   Col x  ';
+    '<Enter> Edit  <AltT> Test  <F2> Save  <F10> Menu '#$B3' N             Row x   Col x  ';
     StatusForm2 : string[80] =
     {         1         2         3         4         5         6         7         8}
     {12345678901234567890123456789012345678901234567890123456789012345678901234567890}
-    '<Esc> Exit  <^Enter> Done  <AltS> Toggle status  ³ N             f              ';
+    '<Esc> Exit  <^Enter> Done  <AltS> Toggle status  '#$B3' N             f              ';
   var
     Status : string[127];
     Testing : Boolean;

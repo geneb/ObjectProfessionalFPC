@@ -1,16 +1,22 @@
 
-{$IFDEF Windows}                                                      {!!.20}
+{$IFDEF OPWinTP}                                                      {!!.20}
   !! ERROR: This unit is not compatible with Windows applications !!  {!!.20}
 {$ENDIF}                                                              {!!.20}
 
 {$S-,R-,V-,I-,B-,F+,O+,A-}
 
 {Conditional defines that may affect this unit}
-{$I OPDEFINE.INC}
+{$I opdefine.inc}
 
 {$IFDEF Heap6}           {!!.13}
   {$UNDEF FastDispose}   {!!.13}
 {$ENDIF}                 {!!.13}
+
+{FPC port: FastDispose manipulated the TP heap free list (FreePtr/Mark/Release);
+ it cannot be supported by the FPC heap manager and is always off}
+{$IFDEF FastDispose}
+  {$UNDEF FastDispose}
+{$ENDIF}
 
 {*********************************************************}
 {*                    OPSORT.PAS 1.30                    *}
@@ -62,13 +68,6 @@ const
 type
   SortPage = array[0..4095] of Pointer;
   SortPointers = array[0..15] of ^SortPage;
-  MarkRec =
-    record
-      Marker : Pointer;
-      FreeBuf : Pointer;
-      OldFreePtr : Pointer;  {!!.10}
-      BufSize : Word;
-    end;
 
 var
   StPt : ^SortPointers;      {Pointer to sort array}
@@ -81,107 +80,19 @@ var
   PivotSize : Word;          {Size of swapping area}
   Pivot : Pointer;           {Points to temporary element for the pivot element}
   UserLess : UserLessFunc;   {User-defined less function}
-  HeapMark : MarkRec;        {Used to restore heap when done}
 
   function SortPointer(Elnum : Word) : Pointer;
     {-Return the sort pointer for element elnum}
-  inline(
-    $58/                     {pop ax              ;get element number}
-    $89/$C3/                 {mov bx,ax           ;save in bx}
-    $B1/$0A/                 {mov cl,10}
-    $D3/$E8/                 {shr ax,cl}
-    $25/$FC/$FF/             {and ax,$FFFC        ;ax has 4*page number}
-    $C4/$3E/>StPt/           {les di,[>stpt]      ;es:di points to array of page pointers}
-    $01/$C7/                 {add di,ax           ;di points to sort page}
-    $26/                     {es:}
-    $C4/$3D/                 {les di,[di]         ;es:di points to base of page}
-    $81/$E3/$FF/$0F/         {and bx,$0FFF        ;bx has index within sort page}
-    $D1/$E3/                 {shl bx,1}
-    $D1/$E3/                 {shl bx,1            ;bx has byte offset within sort page}
-    $01/$DF/                 {add di,bx           ;add to base offset of page}
-    $26/                     {es:}
-    $8B/$05/                 {mov ax,[di]         ;ax has low word of pointer}
-    $26/                     {es:}
-    $8B/$55/$02);            {mov dx,[di+2]       ;dx has high word of pointer}
+  begin
+    SortPointer := StPt^[Elnum shr 12]^[Elnum and $0FFF];
+  end;
 
   procedure SetPointer(p : Pointer; Elnum : Word);
     {-Set the pointer for Elnum to p}
-  inline(
-    $58/                     {pop ax              ;get element number}
-    $89/$C3/                 {mov bx,ax           ;save in bx}
-    $B1/$0A/                 {mov cl,10}
-    $D3/$E8/                 {shr ax,cl}
-    $25/$FC/$FF/             {and ax,$FFFC        ;ax has 4*page number}
-    $C4/$3E/>StPt/           {les di,[>stpt]      ;es:di points to array of page pointers}
-    $01/$C7/                 {add di,ax           ;di points to sort page}
-    $26/                     {es:}
-    $C4/$3D/                 {les di,[di]         ;es:di points to base of page}
-    $81/$E3/$FF/$0F/         {and bx,$0FFF        ;bx has index within sort page}
-    $D1/$E3/                 {shl bx,1}
-    $D1/$E3/                 {shl bx,1            ;bx has byte offset within sort page}
-    $01/$DF/                 {add di,bx           ;add to base offset of page}
-    $58/                     {pop ax              ;get the pointer from stack}
-    $5A/                     {pop dx}
-    $26/                     {es:}
-    $89/$05/                 {mov [di],ax         ;ax has low word of pointer}
-    $26/                     {es:}
-    $89/$55/$02);            {mov [di+2],dx       ;dx has high word of pointer}
-
-  procedure MarkFL(var HeapMark : MarkRec);
-    {-Mark the current top of heap and buffer the free list}
   begin
-    with HeapMark do begin
-      {$IFNDEF Heap6}                                            {!!.10}
-      if Ofs(FreePtr^) = 0 then
-        {Free list is empty}
-        FreeBuf := nil
-      else begin
-        {Buffer the free list}
-        BufSize := LongInt(65536)-Ofs(FreePtr^);
-        {Allow for possibility of free list growth}              {!!.10}
-        if BufSize < $FFF8 then                                  {!!.10}
-          inc(BufSize, 8);                                       {!!.10}
-        GetMem(FreeBuf, BufSize);
-        if FreeBuf <> nil then begin                             {!!.10}
-          OldFreePtr := FreePtr;                                 {!!.10}
-          Move(FreePtr^, FreeBuf^, LongInt(65536)-Ofs(FreePtr^));{!!.10}
-        end;                                                     {!!.10}
-      end;
-      {$ENDIF}                                                   {!!.10}
-      {Mark the top of the heap}
-      Mark(Marker);
-    end;
+    StPt^[Elnum shr 12]^[Elnum and $0FFF] := p;
   end;
 
-  procedure ReleaseFL(HeapMark : MarkRec);
-    {-Release the heap at heap mark and restore the free list}
-  begin
-    with HeapMark do begin
-      {Release from the marker}
-      Release(Marker);
-      {$IFNDEF Heap6}
-      if FreeBuf <> nil then begin
-        {Reset FreePtr}
-        FreePtr := OldFreePtr;                                 {!!.10}
-        {Restore free list}
-        Move(FreeBuf^, FreePtr^, LongInt(65536)-Ofs(FreePtr^));{!!.10}
-        {Dispose of the free list buffer}
-        FreeMem(FreeBuf, BufSize);
-      end;
-      {$ENDIF}
-    end;
-  end;
-
-  function HeapFunc(Size : Word) : Integer;
-    {-Return nil pointer if insufficient memory}
-  begin
-    {$IFDEF Heap6}       {!!.10}
-    if Size = 0 then     {!!.10}
-      HeapFunc := 2      {!!.10}
-    else                 {!!.10}
-    {$ENDIF}             {!!.10}
-      HeapFunc := 1;
-  end;
 
   function PutElement(var X) : Boolean;
     {-Put a sort element into the sort array}
@@ -212,7 +123,11 @@ var
 
       end else
         {Store the element in the sort array}
-        SetPointer(Pointer(X), Index);
+        begin
+          p := nil;
+          Move(X, p, Size);
+          SetPointer(p, Index);
+        end;
 
       Inc(Index);
       PutElement := True;
@@ -392,15 +307,15 @@ var
     p : Pointer;
     Pg : Integer;
     I : Word;
-    SaveHeapError : Pointer;
+    SaveHeapError : Boolean;
   begin
     {Presume success of sorts}
     Status := SortSuccess;
     ElementsSorted := 0;
 
     {Take over heap error control}
-    SaveHeapError := HeapError;
-    HeapError := @HeapFunc;
+    SaveHeapError := ReturnNilIfGrowHeapFails;
+    ReturnNilIfGrowHeapFails := True;
 
     {Store hidden globals}
     Size := ElementSize;
@@ -412,11 +327,6 @@ var
       Elements := MaxElements;
     MaxIndex := Pred(Elements);
     Index := 0;
-
-    {$IFDEF FastDispose}
-      {Mark the heap position for later release}
-      MarkFL(HeapMark);
-    {$ENDIF}
 
     {Get space for the pivot element}
     if Size = 0 then
@@ -494,7 +404,7 @@ var
 
 ExitPoint:
     {Restore heap error control}
-    HeapError := SaveHeapError;
+    ReturnNilIfGrowHeapFails := SaveHeapError;
 
     {Return status}
     Sort := Status;

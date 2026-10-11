@@ -17,7 +17,11 @@
     CurDir : PathStr;
   begin
     GetDir(0, CurDir);
+{$IFDEF UNIX}
+    ColPos := 0;                {no drive letters on Unix}
+{$ELSE}
     ColPos := pos(':', Path);
+{$ENDIF}
     if ColPos = 2 then begin
       {Get current directory on specified drive}
       DrCh := Upcase(Path[1]);
@@ -280,7 +284,7 @@
     P : Pointer;
   begin
     P := diSPtr;
-    Inc(OS(P).O, (diMaxFmatLen+2)*(Item-1));
+    P := Pointer(PtrUInt(P)+PtrUInt((diMaxFmatLen+2)*(Item-1)));
     diRecPtr := P;
   end;
 
@@ -308,7 +312,7 @@
         S := diLeftDrive+S+diRightDrive;
         pkCat := diDirCat;
       end else if ByteFlagIsSet(Attr, Directory) then begin
-        AppendString(S, '\');
+        AppendString(S, DirectorySeparator);
         pkCat := diDirCat;
       end else
         pkCat := pkNormal;

@@ -6,7 +6,7 @@
 {*                 All rights reserved.                  *}
 {*********************************************************}
 
-{$I OPDEFINE.INC}
+{$I opdefine.inc}
 
 {***************************************************************************
  This unit requires that OPDEFINE.INC activate the following defines:
@@ -106,10 +106,10 @@ const
 
   PathLen       = SizeOf(PathStr)-1;
 
-  SliderChar    = '²';
-  ScrollBarChar = '°';
+  SliderChar    = #$B2;
+  ScrollBarChar = #$B0;
   BackdropAttr  = $07;
-  BackdropChar  = '°';
+  BackdropChar  = #$B0;
 
   {colors}
   MakeScrnColors : ColorSet = (
@@ -393,8 +393,9 @@ const
     AnyChar, ForceUp, ForceLo, ForceMixed, AlphaOnly, UpperAlpha, LowerAlpha,
     NumberOnly, DigitOnly, Scientific, HexOnly, BooleanOnly, YesNoOnly,
     {$IFDEF UseDates}
-    NameOnly, NameOnlyU, MonthOnly, DayOnly, YearOnly, HourOnly, MinOnly, SecOnly,
-    MonthOnlyU, DayOnlyU, HourOnlyU, MinOnlyU, SecOnlyU, TimeOnly, EmOnly,
+    {FPC port: MinOnly/MinOnlyU omitted; they duplicate MonthOnly/MonthOnlyU}
+    NameOnly, NameOnlyU, MonthOnly, DayOnly, YearOnly, HourOnly, SecOnly,
+    MonthOnlyU, DayOnlyU, HourOnlyU, SecOnlyU, TimeOnly, EmOnly,
     {$ENDIF}
     User1..User8];
 
@@ -441,7 +442,7 @@ var
   Popup : StackWindow;  {generic popup window}
   OutF  : Text;
 
-  {$I MSUTIL.IN1}
+  {$I msutil.in1}
 
   procedure GenerateEntryScreen;
     {-Entry screen initialization}
@@ -1080,7 +1081,7 @@ var
       end
       else
         GenLine(0, 'program T'+JustName(UnitName)+';'^M^J);
-      GenLine(0, '{$I OPDEFINE.INC}'^M^J);
+      GenLine(0, '{$I opdefine.inc}'^M^J);
       if GenStreamCode then
         GenLine(0, '{.$DEFINE TestStream}'^M^J);
       if ForUnit and GenFieldNames then

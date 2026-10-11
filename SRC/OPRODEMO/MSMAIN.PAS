@@ -6,7 +6,7 @@
 {*                 All rights reserved.                  *}
 {*********************************************************}
 
-{$I OPDEFINE.INC}
+{$I opdefine.inc}
 
 {***************************************************************************
  This program requires that OPDEFINE.INC activate the following defines:
@@ -103,7 +103,7 @@ const
   FirstCmd   : Byte = ccSelect; {first commands to execute}
 
   TabDelta   = 8;
-  WordDelims : CharSet = [^I, ' '..'"', '.', ',', ':', ';', '?', '!',
+  WordDelims : CharSet = [^I, ' '..'"', '.', ',', ':', ';', '?',  {FPC port: duplicate '!' removed, it is in ' '..'"'}
                           '*','(', ')', '[', ']', '{', '}', '<', '>',
                           '+', '-', '/', '\', '''', '$', '=', '^', '#'];
 
@@ -199,15 +199,49 @@ const
 var
   MakeScrnCommands : CommandProcessor;
 
-  {$L MSMAIN.OBJ}
+  {FPC port: GetPicture (MSMAIN.ASM) reimplemented as a table lookup}
+const
+  PictureTable : array[1..29] of string[66] = (
+    'XXXXXXXXXX  Any character',
+    '!!!!!!!!!!  Any character, force upper case',
+    'LLLLLLLLLL  Any character, force lower case',
+    'xxxxxxxxxx  Any character, force mixed case',
+    'aaaaaaaaaa  Alphas only (international alphas, '' '', ''-'', ''.'', '','')',
+    'AAAAAAAAAA  Alphas only, upper case',
+    'llllllllll  Alphas only, lower case',
+    '9999999999  Numbers (''0''..''9'', '' '')',
+    '##########  Digits (''0''..''9'', '' '', ''-'', ''.'')',
+    ' #####.##   Spaces on sides, use for ''Parens with minus'' option',
+    '$######.##  Floating dollar, fixed decimal (''$123456.78'')',
+    'c######.##  Fixed currency, left (''$   123.45'')',
+    '#####.##CC  Fixed currency, right (''12345,67 F'')',
+    '$##,###.##  Discretionary comma (''$12,345.67'', ''   $123.45'')',
+    'EEEEEEEEEE  Scientific (''0''..''9'', '' '', ''-'', ''+'', ''.'', ''e'', ''E'')',
+    'KKKKKKKKKK  Hexadecimal (''0''..''9'', '' '', ''A''..''F'', ''a''..''f'')',
+    'B           Boolean (''T'',''t'',''F'',''f'')',
+    'Y           Yes-no (''Y'',''y'',''N'',''n'')',
+    'mm/dd/yyyy  Date, zero padded (''04/01/1989'')',
+    'MM/DD/yyyy  Date, blank padded ('' 4/ 1/1989'')',
+    'dd/nnn/yy   Date, named month (''01/Apr/89'')',
+    'dd/NNN/yy   Date, named month, upper case (''01/APR/89'')',
+    'hh:mm:ss    Time, zero padded (''06:10:20'')',
+    'HH:mm:ss    Time, blank padded ('' 6:10:20'')',
+    'hh:mmt      Time, am/pm format (''12:00p'')',
+    'hh:mm te    Time, am/pm format (''12:00 pm'')',
+    '0000000000  User-defined picture mask characters (''0''..''8'')',
+    '   ...',
+    '8888888888');
 
-  {$F+}
-  function GetPicture(B : Byte) : StringPtr; external;
+  function GetPicture(B : Byte) : StringPtr;
     {-Used to display sample picture masks}
-  {$F-}
+  begin
+    if (B < 1) or (B > 29) then
+      B := 1;
+    GetPicture := StringPtr(@PictureTable[B]);
+  end;
 
-  {$I MSMAIN.IN1}    {miscellaneous}
-  {$I MSMAIN.IN2}    {adding/editing fields}
+  {$I msmain.in1}    {miscellaneous}
+  {$I msmain.in2}    {adding/editing fields}
 
   procedure DoTab(Delta : Integer);
     {-Tab left or right}
@@ -745,14 +779,14 @@ var
 
     {get the three characters that will make up the line}
     if Vert then begin
-      Ch1 := '³';
-      Ch2 := '³';
-      Ch3 := '³';
+      Ch1 := #$B3;
+      Ch2 := #$B3;
+      Ch3 := #$B3;
     end
     else begin
-      Ch1 := 'Ä';
-      Ch2 := 'Ä';
-      Ch3 := 'Ä';
+      Ch1 := #$C4;
+      Ch2 := #$C4;
+      Ch3 := #$C4;
     end;
     if not EditLineChars(Ch1, Ch2, Ch3) then
       Exit;

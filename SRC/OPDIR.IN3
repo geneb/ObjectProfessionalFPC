@@ -201,9 +201,7 @@
     {Change unit code}
     cwUnitCode := ucDir;
 
-    {Downward adjust heap space to use}
-    if paHeapToUse > MaxAvail then  {!!.01}
-      paHeapToUse := MaxAvail;      {!!.01}
+    {FPC port: no MaxAvail clamp; GetMemCheck reports failure}
 
     {Allocate space for file buffer}
     if (paHeapToUse = 0) or not GetMemCheck(paDPtr, paHeapToUse) then begin {!!.01}
@@ -276,7 +274,8 @@
     StartDir := AddBackSlash(StartDir);
 
 
-    FindFirst(StartDir+'*.*', Directory, Srec);
+    { FPC port: Name is truncated to 12 chars to match the PName field }
+    FindFirst(StartDir+'*', Directory, Srec);
     while DosError = 0 do begin
       with Srec do
         if ByteFlagIsSet(Attr, Directory) then begin
@@ -325,7 +324,11 @@
         PName := UpCase(paDrive)
       else
         PName := LoCase(paDrive);
+{$IFDEF UNIX}
+      PName := DirectorySeparator;
+{$ELSE}
       PName := PName+':\';
+{$ENDIF}
     end;
     paCurFiles := 1;
     paMaxLen := 5;
@@ -344,10 +347,14 @@
     I : Word;
     CurDir : PathStr;
   begin
+{$IFDEF UNIX}
+    GetDir(0, CurDir);
+{$ELSE}
     GetDir(Byte(UpCase(paDrive))-Byte('A')+1, CurDir);
-    CurDir := StUpcase(CurDir);
+{$ENDIF}
+    CurDir := FsUp(CurDir);
     for I := 1 to paMaxFiles do
-      if StUpcase(GetMultiPath(I)) = CurDir then begin
+      if FsUp(GetMultiPath(I)) = CurDir then begin
         SetInitialChoice(I);
         if FlagIsSet(paFlags, paAltCurDir) then
           paDPtr^[I].PCat := pkAlternate;
@@ -633,7 +640,7 @@
     cwUnitCode := ucDir;
 
     {Load fixed data}
-    S.Read(paFlags, Ofs(paLine)-Ofs(paFlags)+SizeOf(PathDrawArray));
+    S.Read(paFlags, PtrUInt(@paLine)-PtrUInt(@paFlags)+SizeOf(PathDrawArray));
     if S.PeekStatus <> 0 then begin
       Done;
       Fail;
@@ -668,7 +675,7 @@
     PickList.Store(S);
 
     {Store fixed data}
-    S.Write(paFlags, Ofs(paLine)-Ofs(paFlags)+SizeOf(PathDrawArray));
+    S.Write(paFlags, PtrUInt(@paLine)-PtrUInt(@paFlags)+SizeOf(PathDrawArray));
   end;
 
   procedure PathListStream(SPtr : IdStreamPtr);

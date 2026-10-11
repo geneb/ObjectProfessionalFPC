@@ -1,11 +1,11 @@
-{$IFDEF Windows}                                                      {!!.20}
+{$IFDEF OPWinTP}                                                      {!!.20}
   !! ERROR: This unit is not compatible with Windows applications !!  {!!.20}
 {$ENDIF}                                                              {!!.20}
 
 {$S-,R-,V-,I-,B-,F+,O+,A-}
 
 {Conditional defines that may affect this unit}
-{$I OPDEFINE.INC}
+{$I opdefine.inc}
 
 {*********************************************************}
 {*                   OPFRAME.PAS 1.30                    *}
@@ -69,11 +69,11 @@ const
 
   {---- Convenient window frame constants ----}
 const
-  DefWindowFrame    : FrameArray = 'ÕÔ¸¾ÍÍ³³';
+  DefWindowFrame    : FrameArray = #$D5#$D4#$B8#$BE#$CD#$CD#$B3#$B3;
 const
-  DblWindowFrame    : FrameArray = 'ÉÈ»¼ÍÍºº';
+  DblWindowFrame    : FrameArray = #$C9#$C8#$BB#$BC#$CD#$CD#$BA#$BA;
 const
-  SglWindowFrame    : FrameArray = 'ÚÀ¿ÙÄÄ³³';
+  SglWindowFrame    : FrameArray = #$DA#$C0#$BF#$D9#$C4#$C4#$B3#$B3;
 const
   NoWindowFrame     : FrameArray = NoFrameChar+NoFrameChar+
                                    NoFrameChar+NoFrameChar+
@@ -92,15 +92,15 @@ const
 
 const
   {---- Characters used for drawing scroll bars ----}
-  DefSliderChar     : Char = #178; {Character for slider           : ²}
-  DefBarChar        : Char = #176; {Character for scroll bar       : °}
+  DefSliderChar     : Char = #178; {Character for slider           : ?}
+  DefBarChar        : Char = #176; {Character for scroll bar       : ?}
   {$ENDIF}
 
   {$IFDEF UseShadows}
   {---- Characters used for drawing opaque shadows ----}
 const
-  DefShadowCharH    : Char = #223; {Character for horizontal shadow: ß}
-  DefShadowCharV    : Char = #219; {Character for vertical shadow  : Û}
+  DefShadowCharH    : Char = #223; {Character for horizontal shadow: ?}
+  DefShadowCharV    : Char = #219; {Character for vertical shadow  : ?}
   {$ENDIF}
 
 type
@@ -685,8 +685,8 @@ procedure Raise(var H : Byte; Min : Byte);
 
 implementation
 
-  {$I OPFRAME.IN1}                {Screen rect, AbstractFrame, ...}
-  {$I OPFRAME.IN2}                {Frame}
+  {$I opframe.in1}                {Screen rect, AbstractFrame, ...}
+  {$I opframe.in2}                {Frame}
 
 {$IFDEF InitAllUnits}
 begin

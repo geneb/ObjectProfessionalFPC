@@ -1,10 +1,10 @@
-{$IFDEF Windows}                                                      {!!.20}
+{$IFDEF OPWinTP}                                                      {!!.20}
   !! ERROR: This unit is not compatible with Windows applications !!  {!!.20}
 {$ENDIF}                                                              {!!.20}
 
 {$S-,R-,V-,I-,B-,F+,O+,A-}
 
-{$I OPDEFINE.INC}
+{$I opdefine.inc}
 
 {*********************************************************}
 {*                   OPMEMO.PAS 1.30                     *}
@@ -37,7 +37,7 @@ uses
   {$ENDIF}         {!!.03}
   ;
 
-  {$I OPMEMO.ICD}  {configuration data}
+  {$I opmemo.icd}  {configuration data}
 
 const
   {option codes}
@@ -70,7 +70,7 @@ const
                                                          {!!.22}
   DefTabDelta      : Byte = 8;
   DefMaxLength     : Byte = 254;
-  meWordDelims     : CharSet = [^I, ' '..'"', '.', ',', ':', ';', '?', '!',
+  meWordDelims     : CharSet = [^I, ' '..'"', '.', ',', ':', ';', '?',
                                 '*','(', ')', '[', ']', '{', '}', '<', '>',
                                 '+', '-', '/', '\', '''', '$', '=', '^', '#'];
 
@@ -330,13 +330,38 @@ const
   CRLF : array[1..2] of Char = ^M^J;
   SearchFailed = $FFFF;
 
-  {$L OPMEMO.OBJ}
-
-  {$I OPMEMO.IN1}  {misc. Memo methods, MemoFiles, streams}
+  {$I opmemo.in1}  {misc. Memo methods, MemoFiles, streams}
 
   function Scan(Limit : Integer; Ch : Char; T : Pointer) : Integer;
-    {-Scan limit chars for Ch; Ch not found if Result=Limit}
-    external;
+    {-Scan limit chars for Ch; Ch not found if Result=Limit.  A negative Limit
+      scans backward from T.  Port of OPMEMO.ASM Scan (Limit=0 returns -1)}
+  var
+    P : PtrUInt;
+    N, K : LongInt;
+  begin
+    P := PtrUInt(T);
+    if Limit = 0 then begin
+      Scan := -1;
+      Exit;
+    end;
+    if Limit > 0 then begin
+      N := Limit;
+      for K := 0 to N-1 do
+        if Char(Pointer(P+PtrUInt(K))^) = Ch then begin
+          Scan := K;
+          Exit;
+        end;
+      Scan := Limit;
+    end else begin
+      N := -LongInt(Limit);
+      for K := 0 to N-1 do
+        if Char(Pointer(P-PtrUInt(K))^) = Ch then begin
+          Scan := -K;
+          Exit;
+        end;
+      Scan := Limit;
+    end;
+  end;
 
   procedure MemoStatus(MP : MemoPtr);
     {-Display status line}
@@ -960,10 +985,9 @@ const
   procedure Memo.meToggleInsertMode;
     {-Toggle between insert and overtype mode, keeping BIOS keyboard flag up
       to date}
-  var
-    BiosKbdFlag : ^Byte; {absolute $0040 : $0017}                     {!!.20}
   begin
-    BiosKbdFlag := Ptr(BiosDataSele, $17);                            {!!.20}
+    {FPC port: stubbed because the BIOS keyboard flag (0040:0017) does not
+     exist outside DOS; the BIOS insert-state bit is no longer kept in sync}
     {toggle insert flag}
     meToggleOption(meInsert);
 
@@ -971,14 +995,10 @@ const
     if VirtualSegment <> VideoSegment then
       SetCursor(cuHidden)
     {use fat cursor if inserting}
-    else if LongFlagIsSet(meOptions, meInsert) then begin
-      SetCursor(InsertCursor);
-      BiosKbdFlag^ := BiosKbdFlag^ or $80;                             {!!.20}
-    end
-    else begin
+    else if LongFlagIsSet(meOptions, meInsert) then
+      SetCursor(InsertCursor)
+    else
       SetCursor(OvertypeCursor);
-      BiosKbdFlag^ := BiosKbdFlag^ and $7F;                            {!!.20}
-    end;
   end;
 
   procedure Memo.meDrawCurrentLine;

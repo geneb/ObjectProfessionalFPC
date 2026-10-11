@@ -6,7 +6,7 @@
 {*                 All rights reserved.                  *}
 {*********************************************************}
 
-{$I OPDEFINE.INC}
+{$I opdefine.inc}
 
 {***************************************************************************
  This unit requires that OPDEFINE.INC activate the following defines:
@@ -57,12 +57,12 @@ uses
 const
   ucMakeMisc = 40;                {unit code}
 
-  SglCrossBar = 'Ä';
-  SglLeftTee  = 'Ã';
-  SglRightTee = '´';
-  DblCrossBar = 'Í';
-  DblLeftTee  = 'Æ';
-  DblRightTee = 'µ';
+  SglCrossBar = #$C4;
+  SglLeftTee  = #$C3;
+  SglRightTee = #$B4;
+  DblCrossBar = #$CD;
+  DblLeftTee  = #$C6;
+  DblRightTee = #$B5;
   DefCrossBar : Char = SglCrossBar;
   DefLeftTee  : Char = SglLeftTee;
   DefRightTee : Char = SglRightTee;
@@ -488,6 +488,7 @@ implementation
 
 var
   KbdFlagsPtr : ^Word;     {!!.20}
+  DummyKbdFlags : Word;    {FPC port: stands in for the BIOS keyboard flags}
 
 const
   MaxFrameTypes = 25;
@@ -495,38 +496,38 @@ const
   FrameTypes : array[1..MaxFrameTypes] of FrameArray = (
     NoFrame,                  {null frame}
     {13 line-type frames}
-    'ÚÀ¿ÙÄÄ³³',               {single-line}
-    'ÉÈ»¼ÍÍºº',               {double-line}
-    'ÕÔ¸¾ÍÍ³³',               {single vertical, double horizontal}
-    'ÖÓ·½ÄÄºº',               {double v, single h}
-    'ÂÀÂÙÄÄ³³',               {single-line, flat top}
-    'ËÈË¼ÍÍºº',               {double-line, flat top}
-    'ÑÔÑ¾ÍÍ³³',               {single v, double h, flat top}
-    'ÒÓÒ½ÄÄºº',               {double v, single h, flat top}
-    'ÚÁ¿ÁÄÄ³³',               {single-line, flat bottom}
-    'ÉÊ»ÊÍÍºº',               {double-line, flat bottom}
-    'ÕÏ¸ÏÍÍ³³',               {single v, double h, flat bottom}
-    'ÖÐ·ÐÄÄºº',               {double v, single h, flat bottom}
+    #$DA#$C0#$BF#$D9#$C4#$C4#$B3#$B3,               {single-line}
+    #$C9#$C8#$BB#$BC#$CD#$CD#$BA#$BA,               {double-line}
+    #$D5#$D4#$B8#$BE#$CD#$CD#$B3#$B3,               {single vertical, double horizontal}
+    #$D6#$D3#$B7#$BD#$C4#$C4#$BA#$BA,               {double v, single h}
+    #$C2#$C0#$C2#$D9#$C4#$C4#$B3#$B3,               {single-line, flat top}
+    #$CB#$C8#$CB#$BC#$CD#$CD#$BA#$BA,               {double-line, flat top}
+    #$D1#$D4#$D1#$BE#$CD#$CD#$B3#$B3,               {single v, double h, flat top}
+    #$D2#$D3#$D2#$BD#$C4#$C4#$BA#$BA,               {double v, single h, flat top}
+    #$DA#$C1#$BF#$C1#$C4#$C4#$B3#$B3,               {single-line, flat bottom}
+    #$C9#$CA#$BB#$CA#$CD#$CD#$BA#$BA,               {double-line, flat bottom}
+    #$D5#$CF#$B8#$CF#$CD#$CD#$B3#$B3,               {single v, double h, flat bottom}
+    #$D6#$D0#$B7#$D0#$C4#$C4#$BA#$BA,               {double v, single h, flat bottom}
     '++++--||',               {printable ASCII}
     {4 solid frames}
-    'ÛÛÛÛÛÛÛÛ',               {solid block}
-    '°°°°°°°°',               {polka-dot block #1}
-    '±±±±±±±±',               {polka-dot block #2}
-    '²²²²²²²²',               {polka-dot block #3}
+    #$DB#$DB#$DB#$DB#$DB#$DB#$DB#$DB,               {solid block}
+    #$B0#$B0#$B0#$B0#$B0#$B0#$B0#$B0,               {polka-dot block #1}
+    #$B1#$B1#$B1#$B1#$B1#$B1#$B1#$B1,               {polka-dot block #2}
+    #$B2#$B2#$B2#$B2#$B2#$B2#$B2#$B2,               {polka-dot block #3}
     {7 semi-solid frames}
-    'þþþþþþþþ',               {squares}
+    #$FE#$FE#$FE#$FE#$FE#$FE#$FE#$FE,               {squares}
     '********',               {asterisks}
     ^O^O^O^O^O^O^O^O,         {snowflakes}
     ^D^D^D^D^D^D^D^D,         {diamonds}
     ^G^G^G^G^G^G^G^G,         {dots 1}
-    'ùùùùùùùù',               {dots 2}
-    'úúúúúúúú');              {dots 3}
+    #$F9#$F9#$F9#$F9#$F9#$F9#$F9#$F9,               {dots 2}
+    #$FA#$FA#$FA#$FA#$FA#$FA#$FA#$FA);              {dots 3}
   ColorChoice : String[3] = ' * ';
 
 var                        {!!.20}
   TotalAvail : LongInt;    {!!.20}
 
-  {$I MAKEMISC.IN1}
+  {$I makemisc.in1}
 
   {------------ CharSelector methods ----------}
 
@@ -1106,9 +1107,9 @@ const
     {-Select a color}
   const
     BoxCharArray : array[-1..1, -2..2] of Char = (
-      ('Ú', 'Ä', 'Ä', 'Ä', '¿'),
-      ('³', ' ', '*', ' ', '³'),
-      ('À', 'Ä', 'Ä', 'Ä', 'Ù'));
+      (#$DA, #$C4, #$C4, #$C4, #$BF),
+      (#$B3, ' ', '*', ' ', #$B3),
+      (#$C0, #$C4, #$C4, #$C4, #$D9));
   var
     SaveAttr, Attr : Byte;
     AllDone        : Boolean;
@@ -1675,7 +1676,7 @@ const
           wFastWrite(Long2Str(CurrentEntries),    04, 28, A2);
         wFastWrite('Deleted entries',             05, 04, A2);
           wFastWrite(Long2Str(DeletedEntries),    05, 28, A2);
-        wFastWrite('ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ  ÄÄÄ', 06, 04, A2);
+        wFastWrite(#$C4#$C4#$C4#$C4#$C4#$C4#$C4#$C4#$C4#$C4#$C4#$C4#$C4#$C4#$C4#$C4#$C4#$C4#$C4#$C4#$C4#$C4'  '#$C4#$C4#$C4, 06, 04, A2);
         wFastWrite('Available',                   07, 04, A2);
           wFastWrite(Long2Str(AvailableEntries),  07, 28, A2);
       wFastWrite('Library information',           09, 02, A1);
@@ -1715,7 +1716,7 @@ const
   end;
 
 begin
-  KbdFlagsPtr := Ptr(BiosDataSele, $17);                               {!!.20}
+  KbdFlagsPtr := @DummyKbdFlags;  {FPC port: BIOS keyboard flags (40:17) not accessible}
   TotalAvail := MemAvail;  {!!.20}
 
   {initialize command processor}

@@ -1,10 +1,10 @@
-{$IFDEF Windows}                                                      {!!.20}
+{$IFDEF OPWinTP}                                                      {!!.20}
   !! ERROR: This unit is not compatible with Windows applications !!  {!!.20}
 {$ENDIF}                                                              {!!.20}
 
 {$S-,R-,V-,I-,B-,F+,O+,A-}
 
-{$I OPDEFINE.INC}
+{$I opdefine.inc}
 
 {*********************************************************}
 {*                   OPENTRY.PAS 1.30                    *}
@@ -47,7 +47,7 @@ uses
   {$ENDIF}
   OpSelect;
 
-  {$I OPENTRY.ICD}  {configuration data}
+  {$I opentry.icd}  {configuration data}
 
 {.F-}
 
@@ -666,8 +666,8 @@ implementation
 const
   MaxFields = 2000;  {max number of fields in an entry screen}
 
-  {$I OPENTRY.IN1}           {Routines to add fields}
-  {$I OPENTRY.IN2}           {PickFields, ScrollingEntryScreens, streams}
+  {$I opentry.in1}           {Routines to add fields}
+  {$I opentry.in2}           {PickFields, ScrollingEntryScreens, streams}
 
   constructor EntryScreen.Init(X1, Y1, X2, Y2 : Byte);
     {-Initialize an entry screen}
@@ -1466,7 +1466,6 @@ TopOfLoop:
               ccMouseAuto,          {!!.13}
               ccMouseDown,
               ccMouseSel,
-              ccMouseAuto,
               ccAltKey,             {!!.30}
               ccUser0..ccUser65335 :
                 {don't check} ;

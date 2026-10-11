@@ -31,4 +31,3 @@ begin
   until Win = nil;
   wStack.Done;
 end.
-

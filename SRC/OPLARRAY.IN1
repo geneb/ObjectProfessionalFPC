@@ -30,38 +30,20 @@ type
   TpRArrayInternal = ^TpRArrayRec;
   LongPtr = ^LongInt;
 
-function RArrayAddress(H : RArrayHeader; R, C : Word) : LongInt;
+function RArrayAddress(const H : RArrayHeader; R, C : Word) : LongInt;
   {-Return the page parameters for a given row and column}
-Inline(
-  $5B/                   {  pop bx                    ;save column in bx}
-  $58/                   {  pop ax                    ;save row in ax}
-  $5F/                   {  pop di                    ;offset of array header}
-  $07/                   {  pop es                    ;segment of array header}
-  $31/$D2/               {  xor dx,dx                 ;prepare to divide}
-  $26/                   {  es:}
-  $F7/$75/<RPPOFS/       {  div word ptr [di+<RPPOfs] ;divide by RowsInPage (POR in DX, PR in AX)}
-  $89/$D1/               {  mov cx,dx                 ;save POR in cx}
-  $89/$C6/               {  mov si,ax                 ;save PR in si}
-  $89/$D8/               {  mov ax,bx                 ;col into ax}
-  $31/$D2/               {  xor dx,dx                 ;prepare to divide}
-  $26/                   {  es:}
-  $F7/$75/<CPPOFS/       {  div word ptr [di+<CPPOfs] ;divide by ColsInPage (POC in DX, PC in AX)}
-  $89/$C3/               {  mov bx,ax                 ;save PC in BX}
-  $26/                   {  es:}
-  $8B/$45/<PDOFS/        {  mov ax,[di+<PDOfs]        ;get PagesDown in AX}
-  $52/                   {  push dx                   ;save POC a moment}
-  $F7/$E3/               {  mul bx                    ;PagesDown*PC}
-  $01/$F0/               {  add ax,si                 ;Pnum = PR+PagesDown*PC}
-  $89/$C2/               {  mov dx,ax                 ;Store Pnum in dx}
-  $89/$D6/               {  mov si,dx}
-  $58/                   {  pop ax                    ;get POC back}
-  $26/                   {  es:}
-  $F7/$65/<RPPOFS/       {  mul word ptr [di+<RPPOfs] ;RowsPerPage*POC}
-  $01/$C8/               {  add ax,cx                 ;POR+RowsPerPage*POC}
-  $26/                   {  es:}
-  $F7/$65/<ESOFS/        {  mul word ptr [di+<ESOfs]  ;ElSize*(POR+RowsPerPage*POC)}
-                         {                            ;POfs in ax}
-  $89/$F2);              {  mov dx,si                 ;PNum in DX}
+var
+  A : ArrayLI;
+  PR, POR, PC, POC : Word;
+begin
+  PR := R div H.RowsInPage;
+  POR := R mod H.RowsInPage;
+  PC := C div H.ColsInPage;
+  POC := C mod H.ColsInPage;
+  A.PNum := Word(PR + Word(H.PagesDown * PC));
+  A.POfs := Word(H.ElSize * Word(POR + Word(H.RowsInPage * POC)));
+  RArrayAddress := LongInt(A);
+end;
 
   procedure RamArray.RetA(Row, Col : Word; var Value);
     {-Return the value of A[r,c] as a VAR parameter}
@@ -379,36 +361,23 @@ Inline(
     GetElementSize := TpRArrayInternal(Internal)^.Header.ElSize;
   end;
 
-function VArrayRC(Header : VArrayHeader; PNum,POfs : Word) : LongInt;
-Inline(
-  $5B/                   {  pop   bx                     ; POfs}
-  $58/                   {  pop   ax                     ; PNum}
-  $5F/                   {  pop   di                     ; Header offset}
-  $07/                   {  pop   es                     ; Header segment}
-  $55/                   {  push  bp}
-  $31/$D2/               {  xor   dx,dx}
-  $26/                   {  es:}
-  $F7/$75/<VPDOFS/       {  div   word ptr [di+<vPDOfs]  ; ax has PR, dx has PC}
-  $89/$D1/               {  mov   cx,dx                  ; cx now has PC}
-  $89/$C6/               {  mov   si,ax                  ; si now has PR}
-  $31/$D2/               {  xor   dx,dx}
-  $89/$D8/               {  mov   ax,bx                  ; ax now has POfs}
-  $26/                   {  es:}
-  $F7/$75/<VRPPOFS/      {  div   word ptr [di+<vRPPOfs] ; ax has POR, dx has POC}
-  $89/$C5/               {  mov   bp,ax                  ; bp now has POR}
-  $89/$F0/               {  mov   ax,si                  ; ax now has PR}
-  $89/$D6/               {  mov   si,dx                  ; si now has POC}
-  $26/                   {  es:}
-  $F7/$65/<VCPPOFS/      {  mul   word ptr [di+<vCPPOfs] ; C := PR * CPP}
-  $01/$E8/               {  add   ax,bp                  ; C := C + ROR}
-  $89/$C5/               {  mov   bp,ax                  ; bp now has Column}
-  $89/$C8/               {  mov   ax,cx                  ; ax now has PC}
-  $26/                   {  es:}
-  $F7/$65/<VRPPOFS/      {  mul   word ptr [di+<vRPPOfs] ; R := PC * RPP}
-  $01/$F0/               {  add   ax,si                  ; R := R + POC}
-  $89/$EA/               {  mov   dx,bp}
-  $5D);                  {  pop   bp}
-
+function VArrayRC(const Header : VArrayHeader; PNum,POfs : Word) : LongInt;
+  {-given a VArray header, a page number, and page offset calculate the row
+   and column numbers}
+var
+  RC : ArrayRC;
+  PR,PC,POR,POC : Word;
+begin
+  with Header do begin
+    PR := PNum div PagesDown;
+    PC := PNum mod PagesDown;
+    POR := POfs div RowsInPage;
+    POC := POfs mod RowsInPage;
+    RC.C := Word(PR * ColsInPage + POR);
+    RC.R := Word(PC * RowsInPage + POC);
+  end;
+  VArrayRC := LongInt(RC);
+end;
 (* This is the equivalent Pascal code to the above inline macro
   function VArrayRC(Header : VArrayHeader; PNum,POfs : Word) : LongInt;
   {-given a VArray header, a page number, and page offset calculate the row
@@ -696,7 +665,7 @@ Inline(
           Dec(NumInBuf);               {indicate we used an element}
           with RC do
             SafeSetA(RC.R,RC.C,E^);         {add the element to the array}
-          Inc(SegOfs(E).Ofst,ElementSize);  {point to next element}
+          E := Pointer(PtrUInt(E)+ElementSize);  {point to next element}
         end;
       end;
     end;

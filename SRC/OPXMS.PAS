@@ -1,5 +1,5 @@
 
-{$IFDEF Windows}                                                      {!!.20}
+{$IFDEF OPWinTP}                                                      {!!.20}
   !! ERROR: This unit is not compatible with Windows applications !!  {!!.20}
 {$ENDIF}                                                              {!!.20}
 
@@ -9,7 +9,7 @@
 
 {$S-,R-,V-,I-,B-,F-,O-,A-}
 
-{$I OPDEFINE.INC}
+{$I opdefine.inc}
 
 {*********************************************************}
 {*                   OPXMS.PAS 1.30                      *}
@@ -19,6 +19,8 @@
 
 unit OpXms;
   {-XMS memory management routines}
+  { FPC port: stubbed because XMS (INT 2Fh driver, far-call control proc, HMA,
+    A20) has no equivalent on Windows/Linux; reports 'XMS not installed'. }
 
 interface
 
@@ -327,429 +329,139 @@ function XmsErrorString(ErrorCode : Byte) : String;
 
 implementation
 
-  function XmsInstalledPrim : Boolean;
-    {-Returns True if an XMS memory manager is installed}
-  inline(
-    $B8/$00/$43/     {   MOV     AX,$4300           ; XMS Installed function}
-    $CD/$2F/         {   INT     $2F                ; DOS Multiplex int}
-    $3C/$80/         {   CMP     AL,$80             ; is it there?}
-    $75/$04/         {   JNE     NoXmsDriver}
-    $B0/$01/         {   MOV     AL,1               ; return True}
-    $EB/$02/         {   JMP     SHORT XIExit}
-                     {NoXmsDriver:}
-    $30/$C0);        {   XOR     AL,AL              ; return False}
-                     {XIExit:}
+{ FPC port: stubbed because XMS (INT 2Fh/4300h driver, far-call control
+  procedure, HMA, A20 line, UMBs) does not exist on Windows/Linux.
+  XmsControl is always Nil and XmsInstalled returns False.  Every XMS call
+  returns FuncNotImplemented ($80), which is what an XMS driver reports for an
+  unsupported function; output parameters are zeroed.  XmsErrorString is real
+  (portable) code. }
 
   function XmsInstalled : Boolean;
     {-Returns True if an XMS memory manager is installed}
   begin
+    { FPC port: stubbed because there is no XMS driver }
     XmsInstalled := XmsControl <> Nil;
   end;
 
-  function RequestHMAPrim(Bytes : Word) : Byte;
-  inline(
-    $5A/                   {  POP      DX      ; get Bytes}
-    $B4/$01/               {  MOV      AH,1    ; XMS function 1 - Request HMA}
-    $FF/$1E/>XmsControl/   {  CALL     DWORD PTR [>XmsControl]}
-    $09/$C0/               {  OR       AX,AX}
-    $74/$04/               {  JZ       Error}
-    $30/$C0/               {  XOR      AL,AL}
-    $EB/$02/               {  JMP      SHORT ExitPoint}
-                           {Error:}
-    $88/$D8);              {  MOV      AL,BL}
-                           {ExitPoint:}
-
   function RequestHMA(Bytes : Word) : Byte;
-    {-Request the High Memory Area (HMA). Bytes is amount of memory if TSR or
-      device driver, or $FFFF if application program.
-
-      Possible return codes:
-        $00 successful
-        $80 if the function is not implemented
-        $81 if a VDISK device is detected
-        $90 if the HMA does not exist
-        $91 if the HMA is already in use
-        $92 if Bytes is less than the /HMAMIN= parameter
-    }
   begin
-    RequestHMA := RequestHMAPrim(Bytes)
+    { FPC port: stubbed because there is no XMS driver }
+    RequestHMA := FuncNotImplemented;
   end;
-
-  function ReleaseHMAPrim : Byte;
-  inline(
-    $B4/$02/               {  MOV      AH,2    ; XMS function 2 - Release HMA}
-    $FF/$1E/>XmsControl/   {  CALL     DWORD PTR [>XmsControl]}
-    $09/$C0/               {  OR       AX,AX}
-    $74/$04/               {  JZ       Error}
-    $30/$C0/               {  XOR      AL,AL}
-    $EB/$02/               {  JMP      SHORT ExitPoint}
-                           {Error:}
-    $88/$D8);              {  MOV      AL,BL}
-                           {ExitPoint:}
 
   function ReleaseHMA : Byte;
-    {-Release the High Memory Area.
-
-      Possible return codes:
-        $00 successful
-        $80 if the function is not implemented
-        $81 if a VDISK device is detected
-        $90 if the HMA does not exist
-        $93 if the HMA was not allocated
-    }
   begin
-    ReleaseHMA := ReleaseHMAPrim;
+    { FPC port: stubbed because there is no XMS driver }
+    ReleaseHMA := FuncNotImplemented;
   end;
-
-  function GlobalEnableA20Prim : Byte;
-  inline(
-    $B4/$03/               {  MOV AH,3      ; XMS function 3 - Global Enable A20}
-    $FF/$1E/>XmsControl/   {  CALL     DWORD PTR [>XmsControl]}
-    $09/$C0/               {  OR       AX,AX}
-    $74/$04/               {  JZ       Error}
-    $30/$C0/               {  XOR      AL,AL}
-    $EB/$02/               {  JMP      SHORT ExitPoint}
-                           {Error:}
-    $88/$D8);              {  MOV      AL,BL}
-                           {ExitPoint:}
 
   function GlobalEnableA20 : Byte;
-    {-Attempt to enable the A20 line. Should be used only by programs that
-      have control of the HMA.
-
-      Possible return codes:
-        $00 successful
-        $80 if the function is not implemented
-        $81 if a VDISK device is detected
-        $82 if an A20 error occurs
-    }
   begin
-    GlobalEnableA20 := GlobalEnableA20Prim;
+    { FPC port: stubbed because there is no XMS driver }
+    GlobalEnableA20 := FuncNotImplemented;
   end;
-
-  function GlobalDisableA20Prim : Byte;
-  inline(
-    $B4/$04/               {  MOV AH,4      ; XMS function 4 - Global Disable A20}
-    $FF/$1E/>XmsControl/   {  CALL     DWORD PTR [>XmsControl]}
-    $09/$C0/               {  OR       AX,AX}
-    $74/$04/               {  JZ       Error}
-    $30/$C0/               {  XOR      AL,AL}
-    $EB/$02/               {  JMP      SHORT ExitPoint}
-                           {Error:}
-    $88/$D8);              {  MOV      AL,BL}
-                           {ExitPoint:}
 
   function GlobalDisableA20 : Byte;
-    {-Attempt to enable the A20 line. Should be used only by programs that
-      have control of the HMA.
-
-      Possible return codes:
-        $00 successful
-        $80 if the function is not implemented
-        $81 if a VDISK device is detected
-        $82 if an A20 error occurs
-        $94 if the A20 line is still enabled
-    }
   begin
-    GlobalDisableA20 := GlobalDisableA20Prim;
+    { FPC port: stubbed because there is no XMS driver }
+    GlobalDisableA20 := FuncNotImplemented;
   end;
-
-  function LocalEnableA20Prim : Byte;
-  inline(
-    $B4/$05/               {  MOV AH,5      ; XMS function 3 - Local Enable A20}
-    $FF/$1E/>XmsControl/   {  CALL     DWORD PTR [>XmsControl]}
-    $09/$C0/               {  OR       AX,AX}
-    $74/$04/               {  JZ       Error}
-    $30/$C0/               {  XOR      AL,AL}
-    $EB/$02/               {  JMP      SHORT ExitPoint}
-                           {Error:}
-    $88/$D8);              {  MOV      AL,BL}
-                           {ExitPoint:}
 
   function LocalEnableA20 : Byte;
-    {-Attempt to enable the A20 line. Should be used only by programs that
-      need direct access to extended memory.
-
-      Possible return codes:
-        $00 successful
-        $80 if the function is not implemented
-        $81 if a VDISK device is detected
-        $82 if an A20 error occurs
-    }
   begin
-    LocalEnableA20 := LocalEnableA20Prim;
+    { FPC port: stubbed because there is no XMS driver }
+    LocalEnableA20 := FuncNotImplemented;
   end;
-
-  function LocalDisableA20Prim : Byte;
-  inline(
-    $B4/$06/               { MOV AH,6 ;XMS function 6 - Local Disable A20 !!.03}
-    $FF/$1E/>XmsControl/   {  CALL     DWORD PTR [>XmsControl]}
-    $09/$C0/               {  OR       AX,AX}
-    $74/$04/               {  JZ       Error}
-    $30/$C0/               {  XOR      AL,AL}
-    $EB/$02/               {  JMP      SHORT ExitPoint}
-                           {Error:}
-    $88/$D8);              {  MOV      AL,BL}
-                           {ExitPoint:}
 
   function LocalDisableA20 : Byte;
-    {-Attempt to enable the A20 line. Should be used only by programs that
-      need direct access to extended memory.
-
-      Possible return codes:
-        $00 successful
-        $80 if the function is not implemented
-        $81 if a VDISK device is detected
-        $82 if an A20 error occurs
-        $94 if the A20 line is still enabled
-    }
   begin
-    LocalDisableA20 := LocalDisableA20Prim;
+    { FPC port: stubbed because there is no XMS driver }
+    LocalDisableA20 := FuncNotImplemented;
   end;
 
-  function QueryA20Prim : Byte;
-  inline(
-    $B4/$07/               {  MOV      AH,7 ; XMS Function 7 - Query A20 !!.03}
-    $FF/$1E/>XmsControl/   {  CALL     DWORD PTR [>XmsControl]}
-    $08/$DB/               {  OR       BL,BL}
-    $74/$02/               {  JZ       ExitPoint}
-    $88/$D8);              {  MOV      AL,BL}
-                           {ExitPoint:}
-
   function QueryA20 : Byte;
-    {-Checks to see if the A20 line is physically enabled.
-
-      Possible return codes:
-        $00 A20 line disabled
-        $01 A20 line enabled
-        $80 if the function is not implemented
-        $81 if a VDISK device is detected
-    }
   begin
-    QueryA20 := QueryA20Prim;
+    { FPC port: stubbed because there is no XMS driver }
+    QueryA20 := FuncNotImplemented;
   end;
 
   function QueryFreeExtMem(var TotalFree, LargestBlock : Word) : Byte;
-  var
-    ErrorCode : Byte;
   begin
-    inline(
-      $B4/$08/               {  MOV    AH,$08   ;XMS function 08h - Query Free ext memory}
-      $FF/$1E/>XmsControl/   {  CALL   DWORD PTR [>XmsControl]}
-      $09/$C0/               {  OR     AX,AX}
-      $74/$10/               {  JZ     SetError}
-      $30/$DB/               {  XOR    BL,BL}
-      $C4/$BE/>TotalFree/    {  LES    DI,>TotalFree[BP]}
-      $26/                   {ES:}
-      $89/$15/               {  MOV    [DI],DX}
-      $C4/$BE/>LargestBlock/ {  LES    DI,>LargestBlock[BP]}
-      $26/                   {ES:}
-      $89/$05/               {  MOV    [DI],AX}
-                             {SetError:}
-      $88/$5E/<ErrorCode);   {  MOV    <ErrorCode[BP],BL}
-    QueryFreeExtMem := ErrorCode;
+    { FPC port: stubbed because there is no XMS driver }
+    TotalFree := 0;
+    LargestBlock := 0;
+    QueryFreeExtMem := FuncNotImplemented;
   end;
 
   function AllocateExtMem(SizeInK : Word; var XmsHandle : Word) : Byte;
-  var
-    ErrorCode : Byte;
   begin
-    inline(
-      $B4/$09/               {  MOV    AH,$09   ;XMS function 09h - Alloc ext memory block}
-      $8B/$96/>SizeInK/      {  MOV    DX,>SizeInK[BP]}
-      $FF/$1E/>XmsControl/   {  CALL   DWORD PTR [>XmsControl]}
-      $A9/$01/$00/           {  TEST   AX,1}
-      $74/$09/               {  JZ     SetError}
-      $30/$DB/               {  XOR    BL,BL}
-      $C4/$BE/>XmsHandle/    {  LES    DI,>XmsHandle[BP]}
-      $26/                   {ES:}
-      $89/$15/               {  MOV    [DI],DX  ;return XMS handle}
-                             {SetError:}
-      $88/$5E/<ErrorCode);   {  MOV    <ErrorCode[BP],BL}
-    AllocateExtMem := ErrorCode;
+    { FPC port: stubbed because there is no XMS driver }
+    XmsHandle := 0;
+    AllocateExtMem := FuncNotImplemented;
   end;
 
   function FreeExtMem(XmsHandle : Word) : Byte;
-  var
-    ErrorCode : Byte;
   begin
-    inline(
-      $B4/$0A/               {  MOV    AH,$0A   ;XMS function 0Ah - Free ext memory block}
-      $8B/$96/>XmsHandle/    {  MOV    DX,>XmsHandle[BP]}
-      $FF/$1E/>XmsControl/   {  CALL   DWORD PTR [>XmsControl]}
-      $A9/$01/$00/           {  TEST   AX,1}
-      $74/$02/               {  JZ     SetError}
-      $30/$DB/               {  XOR    BL,BL}
-                             {SetError:}
-      $88/$5E/<ErrorCode);   {  MOV    <ErrorCode[BP],BL}
-    FreeExtMem := ErrorCode;
+    { FPC port: stubbed because there is no XMS driver }
+    FreeExtMem := FuncNotImplemented;
   end;
-
-  function MoveExtMemBlockPrim(ParamBlock : Pointer) : Byte;
-    {-Call XMS function $0B to move extended memory}
-  inline(
-    $8C/$D8/               {  MOV    AX,DS}
-    $8E/$C0/               {  MOV    ES,AX}
-    $5E/                   {  POP    SI}
-    $1F/                   {  POP    DS}
-    $50/                   {  PUSH   AX}
-    $B4/$0B/               {  MOV    AH,$0B   ;XMS function 0Bh - Move Extended}
-    $26/                   {ES:}
-    $FF/$1E/>XmsControl/   {  CALL   DWORD PTR [>XmsControl]}
-    $1F/                   {  POP    DS}
-    $A9/$01/$00/           {  TEST   AX,1}
-    $75/$04/               {  JNZ    Success}
-    $88/$D8/               {  MOV    AL,BL}
-    $EB/$02/               {  JMP    SHORT ExitPoint}
-                           {Success:}
-    $30/$C0);              {  XOR    AL,AL}
-                           {ExitPoint:}
-
 
   function MoveExtMemBlock(BlockLength : LongInt;
                            SourceHandle : Word;
                            SourcePtr : ExtMemPtr;
                            DestHandle : Word;
                            DestPtr : ExtMemPtr) : Byte;
-  var
-    ControlBlock : ExtMemMoveStruct;
   begin
-    with ControlBlock do begin
-      Len := BlockLength;
-      SrcHand   := SourceHandle;
-      SrcOffs   := SourcePtr;
-      DestHand  := DestHandle;
-      DestOffs  := DestPtr;
-      MoveExtMemBlock := MoveExtMemBlockPrim(@ControlBlock);
-    end;
+    { FPC port: stubbed because there is no XMS driver }
+    MoveExtMemBlock := FuncNotImplemented;
   end;
 
   function LockExtMemBlock(XmsHandle : Word;
                            var LockedBlock : ExtMemPtr) : Byte;
-  var
-    ErrorCode : Byte;
   begin
-    inline(
-      $B4/$0C/               {  MOV    AH,$0C   ;XMS function 0Ch - Lock ext memory block}
-      $8B/$96/>XmsHandle/    {  MOV    DX,>XmsHandle[BP]}
-      $FF/$1E/>XmsControl/   {  CALL   DWORD PTR [>XmsControl]}
-      $A9/$01/$00/           {  TEST   AX,1}
-      $74/$0D/               {  JZ     SetError}
-      $C4/$BE/>LockedBlock/  {  LES    DI,>LockedBlock[BP]}
-      $26/                   {ES:}
-      $89/$1D/               {  MOV    [DI],BX}
-      $26/                   {ES:}
-      $89/$55/$02/           {  MOV    [DI+2],DX}
-      $30/$DB/               {  XOR    BL,BL}
-                             {SetError:}
-      $88/$5E/<ErrorCode);   {  MOV    <ErrorCode[BP],BL}
-    LockExtMemBlock := ErrorCode;
+    { FPC port: stubbed because there is no XMS driver }
+    LockedBlock.ProtectedPtr := 0;
+    LockExtMemBlock := FuncNotImplemented;
   end;
 
   function UnlockExtMemBlock(XmsHandle : Word) : Byte;
-  var
-    ErrorCode : Byte;
   begin
-    inline(
-      $B4/$0D/               {  MOV    AH,$0D   ;XMS function 0Dh - Unlock ext memory block}
-      $8B/$96/>XmsHandle/    {  MOV    DX,>XmsHandle[BP]}
-      $FF/$1E/>XmsControl/   {  CALL   DWORD PTR [>XmsControl]}
-      $A9/$01/$00/           {  TEST   AX,1}
-      $74/$02/               {  JZ     SetError}
-      $30/$DB/               {  XOR    BL,BL}
-                             {SetError:}
-      $88/$5E/<ErrorCode);   {  MOV    <ErrorCode[BP],BL}
-    UnlockExtMemBlock := ErrorCode;
+    { FPC port: stubbed because there is no XMS driver }
+    UnlockExtMemBlock := FuncNotImplemented;
   end;
 
   function GetHandleInfo(XmsHandle : Word;
                          var LockCount    : Byte;
                          var HandlesLeft  : Byte;
                          var BlockSizeInK : Word) : Byte;
-  var
-    ErrorCode : Byte;
   begin
-    inline(
-      $B4/$0E/               {  MOV    AH,$0E   ;XMS function 0Eh - Get EMB Handle Info}
-      $8B/$96/>XmsHandle/    {  MOV    DX,>XmsHandle[BP]}
-      $FF/$1E/>XmsControl/   {  CALL   DWORD PTR [>XmsControl]}
-      $A9/$01/$00/           {  TEST   AX,1}
-      $74/$17/               {  JZ     SetError}
-      $C4/$BE/>LockCount/    {  LES    DI,>LockCount[BP]}
-      $26/                   {ES:}
-      $88/$3D/               {  MOV    BYTE PTR [DI],BH}
-      $C4/$BE/>HandlesLeft/  {  LES    DI,>HandlesLeft[BP]}
-      $26/                   {ES:}
-      $88/$1D/               {  MOV    BYTE PTR [DI],BL}
-      $C4/$BE/>BlockSizeInK/ {  LES    DI,>BlockSizeInK[BP]}
-      $26/                   {ES:}
-      $89/$15/               {  MOV    [DI],DX}
-      $30/$DB/               {  XOR    BL,BL}
-                             {SetError:}
-      $88/$5E/<ErrorCode);   {  MOV    <ErrorCode[BP],BL}
-    GetHandleInfo := ErrorCode;
+    { FPC port: stubbed because there is no XMS driver }
+    LockCount := 0;
+    HandlesLeft := 0;
+    BlockSizeInK := 0;
+    GetHandleInfo := FuncNotImplemented;
   end;
 
   function ResizeExtMemBlock(XmsHandle : Word; NewSizeInK : Word) : Byte;
-  var
-    ErrorCode : Byte;
   begin
-    inline(
-      $B4/$0F/               {  MOV    AH,$0F   ;XMS function 0Fh - Resize Ext mem block}
-      $8B/$96/>XmsHandle/    {  MOV    DX,>XmsHandle[BP]}
-      $8B/$9E/>NewSizeInK/   {  MOV    BX,>NewSizeInK[BP]}
-      $FF/$1E/>XmsControl/   {  CALL   DWORD PTR [>XmsControl]}
-      $A9/$01/$00/           {  TEST   AX,1}
-      $74/$02/               {  JZ     SetError}
-      $30/$DB/               {  XOR    BL,BL}
-                             {SetError:}
-      $88/$5E/<ErrorCode);   {  MOV    <ErrorCode[BP],BL}
-    ResizeExtMemBlock := ErrorCode;
+    { FPC port: stubbed because there is no XMS driver }
+    ResizeExtMemBlock := FuncNotImplemented;
   end;
 
   function AllocUpperMemBlock(SizeInParas : Word;
                               var SegmentBase : Word;
                               var Size        : Word) : Byte;
-  var
-    ErrorCode : Byte;
   begin
-    inline(
-      $B4/$10/               {  MOV    AH,$10   ;XMS function 10h - Alloc UMB}
-      $8B/$96/>SizeInParas/  {  MOV    DX,>SizeInParas[BP]}
-      $FF/$1E/>XmsControl/   {  CALL   DWORD PTR [>XmsControl]}
-      $A9/$01/$00/           {  TEST   AX,1}
-      $74/$12/               {  JZ     Error}
-      $C4/$BE/>Size/         {  LES    DI,>Size[BP]}
-      $26/                   {ES:}
-      $89/$15/               {  MOV    [DI],DX        ;return actual Size}
-      $C4/$BE/>SegmentBase/  {  LES    DI,>SegmentBase[BP]}
-      $26/                   {ES:}
-      $89/$1D/               {  MOV    [DI],BX        ;return segment base}
-      $30/$DB/               {  XOR    BL,BL}
-      $EB/$07/               {  JMP    SHORT SetError}
-                             {Error:}
-      $C4/$BE/>Size/         {  LES    DI,>Size[BP]}
-      $26/                   {ES:}
-      $89/$15/               {  MOV    [DI],DX        ;return largest avail block}
-                             {SetError:}
-      $88/$5E/<ErrorCode);   {  MOV    <ErrorCode[BP],BL}
-    AllocUpperMemBlock := ErrorCode;
+    { FPC port: stubbed because there is no XMS driver / upper memory }
+    SegmentBase := 0;
+    Size := 0;
+    AllocUpperMemBlock := FuncNotImplemented;
   end;
 
   function FreeUpperMemBlock(SegmentBase : Word) : Byte;
-  var
-    ErrorCode : Byte;
   begin
-    inline(
-      $B4/$11/               {  MOV    AH,$11   ;XMS function 11h - Free UMB}
-      $8B/$96/>SegmentBase/  {  MOV    DX,>SegmentBase[BP]}
-      $FF/$1E/>XmsControl/   {  CALL   DWORD PTR [>XmsControl]}
-      $A9/$01/$00/           {  TEST   AX,1}
-      $74/$02/               {  JZ     SetError}
-      $30/$DB/               {  XOR    BL,BL}
-                             {SetError:}
-      $88/$5E/<ErrorCode);   {  MOV    <ErrorCode[BP],BL}
-    FreeUpperMemBlock := ErrorCode;
+    { FPC port: stubbed because there is no XMS driver / upper memory }
+    FreeUpperMemBlock := FuncNotImplemented;
   end;
 
   function HexB(B : Byte) : string;
@@ -827,26 +539,6 @@ implementation
     end;
   end;
 
-  function XmsControlAddr : Pointer;
-    {-Return address of XMS control function}
-  inline(
-    $B8/$10/$43/     {MOV     AX,$4310           ; XMS control func addr}
-    $CD/$2F/         {INT     $2F}
-    $89/$D8/         {MOV     AX,BX              ; ptr in ES:BX to DX:AX}
-    $8C/$C2);        {MOV     DX,ES}
-
-  function DosVersion : Word;                    {added !!.12}
-    inline(
-      $B4/$30/                 {mov ah,$30}
-      $CD/$21);                {int $21}
-
 begin
-  if Lo(DosVersion) >= 3 then begin               {!!.12}
-    if XmsInstalledPrim then
-      XmsControl := XmsControlAddr
-    else
-      XmsControl := Nil;
-  end
-  else                                            {!!.12}
-    XmsControl := Nil;                            {!!.12}
+  XmsControl := Nil;  { FPC port: stubbed because there is no XMS driver }
 end.

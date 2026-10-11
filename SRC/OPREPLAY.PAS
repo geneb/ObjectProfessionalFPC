@@ -6,7 +6,7 @@
 {*                 All rights reserved.                  *}
 {*********************************************************}
 
-{$IFDEF Windows}                                                      {!!.20}
+{$IFDEF OPWinTP}                                                      {!!.20}
   !! ERROR: This unit is not compatible with Windows applications !!  {!!.20}
 {$ENDIF}                                                              {!!.20}
 
@@ -16,12 +16,16 @@
   {$C FIXED PRELOAD PERMANENT}                                        {!!.20}
 {$ENDIF}                                                              {!!.20}
 
-{$I OPDEFINE.INC}
+{$I opdefine.inc}
 
 unit OpReplay;
-  {-Macro playback}
+  {-Macro playback. FPC port: INT $16 hooking replaced by the OPKEYHK hook
+    (see OPKEYHK.PAS); OPSCRAP.ASM/OPREPLAY.ASM ported to Pascal.}
 
 interface
+
+uses
+  OpKeyHk;
 
 const
   MaxKeysInMacro = 1000;     {arbitrary}
@@ -57,8 +61,14 @@ procedure StringToMacro(S : string; MRP : MacroRecPtr; MaxKeys : Word);
   {-Initialize MRP^ from a string}
 
 procedure Int16;
-  {-The macro engine used to replay keystrokes. It is the user's
-    responsibility to install and uninstall this interrupt handler.}
+  {-FPC port: stub (no INT $16 vector exists). Use InstallReplayHook.}
+
+procedure InstallReplayHook;
+  {-FPC port: install the macro playback engine into the OPKEYHK key hook
+    chain (replaces SetIntVec($16, @Int16))}
+
+procedure RemoveReplayHook;
+  {-FPC port: remove the playback engine installed by InstallReplayHook}
 
 procedure SetEndOfMacroProc(P : Pointer);
   {-Set pointer to procedure to call when end of macro reached}
@@ -76,46 +86,121 @@ procedure SetWaitCount(Count : Byte);           {!!.13}
 
 implementation
 
+uses
+  SysUtils;
+
+const
+  EndOfMacroProc : Pointer = nil;
+type
+  WordPtr = ^Word;
+  EndProc = procedure;
 var
-  CurrentMacroOfs : ^Word absolute CurrentMacroPtr;
-  CSToDSInc : Word; {!!.20}
+  MacroInProgress : Boolean;
+  CurrentMacro : Pointer;
+  WaitCount : Byte;
+  WaitFlag : Byte;
+  ScrapBuf : array[0..MaxKeysInMacro+2] of Word;
+  SavedKeyHook : KeyHookFunc;
+  HookInstalled : Boolean;
 
-  {$L OPREPLAY.OBJ}
-  procedure Int16; external;
-  procedure Int16Init; external;
-  procedure SetEndOfMacroProc(P : Pointer); external;
-  procedure SetWaitCount(Count : Byte); external; {!!.13} {!!.20}
+  function ReplayKeyHook(Peek : Boolean; var Key : Word) : Boolean;
+    {-Macro playback engine (port of INT16 in OPREPLAY.ASM). Keys come from
+      the current macro while one is in progress, otherwise from the previous
+      hook or the native keyboard.}
+  var
+    K : Word;
+    Proc : EndProc;
+  begin
+    while MacroInProgress do begin
+      K := WordPtr(CurrentMacro)^;
+      if K = EndOfMacro then begin
+        MacroInProgress := False;
+        if EndOfMacroProc <> nil then begin
+          Proc := EndProc(EndOfMacroProc);
+          Proc;
+        end;
+      end
+      else begin
+        if Peek then begin
+          if WaitCount <> 0 then begin
+            Inc(WaitFlag);
+            if WaitFlag <= WaitCount then begin
+              ReplayKeyHook := False;
+              Exit;
+            end;
+            WaitFlag := 0;
+          end;
+        end
+        else
+          CurrentMacro := Pointer(PtrUInt(CurrentMacro)+SizeOf(Word));
+        Key := K;
+        ReplayKeyHook := True;
+        Exit;
+      end;
+    end;
 
-  {$L OPSCRAP.OBJ}
-  procedure InitScrapMacroPtr; external;
+    if Assigned(SavedKeyHook) then
+      ReplayKeyHook := SavedKeyHook(Peek, Key)
+    else if Peek then
+      ReplayKeyHook := Assigned(RawCheckKbdProc) and RawCheckKbdProc(Key)
+    else begin
+      Key := RawReadKeyWordProc;
+      ReplayKeyHook := True;
+    end;
+  end;
 
-  procedure InterruptsOn;
-    {-Turn interrupts on}
-    inline($FB); {sti}
+  procedure Int16;
+    {FPC port: stubbed because there is no INT $16 vector to chain; use
+     InstallReplayHook/RemoveReplayHook instead}
+  begin
+  end;
 
-  procedure InterruptsOff;
-    {-Turn interrupts off}
-    inline($FA); {cli}
+  procedure InstallReplayHook;
+  begin
+    if not HookInstalled then begin
+      SavedKeyHook := KeyHook;
+      KeyHook := KeyHookFunc(@ReplayKeyHook);
+      HookInstalled := True;
+    end;
+  end;
+
+  procedure RemoveReplayHook;
+  begin
+    if HookInstalled then begin
+      KeyHook := SavedKeyHook;
+      HookInstalled := False;
+    end;
+  end;
+
+  procedure SetEndOfMacroProc(P : Pointer);
+  begin
+    EndOfMacroProc := P;
+  end;
+
+  procedure SetWaitCount(Count : Byte);
+  begin
+    if Count = 255 then
+      Dec(Count);
+    WaitCount := Count;
+  end;
+
+  procedure InitScrapMacroPtr;
+  begin
+    ScrapMacroSize := MaxKeysInMacro;
+    ScrapMacroPtr := MacroRecPtr(@ScrapBuf);
+    ScrapMacroPtr^.NumKeys := 0;
+    ScrapMacroPtr^.KeyArray[1] := EndOfMacro;
+  end;
 
   procedure StartMacro(Macro : MacroRecPtr);
     {-Starts execution of the specified macro. If a macro is already in
       progress it will immediately be replaced by the macro passed.}
   begin
     if Macro <> nil then begin
-      {turn interrupts off while doing this}
-      InterruptsOff;
-
-      {make this macro the current macro}
-      CurrentMacroPtr^ := Macro;
-
-      {skip past the length word}
-      Inc(CurrentMacroOfs^, 2);
-
-      {Turn this macro on}
-      MacroInProgressPtr^ := True;
-
-      {restore interrupts}
-      InterruptsOn;
+      {make this macro current, skipping past the length word}
+      CurrentMacro := Pointer(PtrUInt(Macro)+SizeOf(Word));
+      MacroInProgress := True;
+      WaitFlag := 0;
     end;
   end;
 
@@ -138,11 +223,13 @@ var
   var
     CharCode : Byte absolute MacroChar;
   begin
+    {FPC port: ^M and ^[ tested first, FPC rejects overlapping case labels}
+    if MacroChar = ^M then
+      CharToMacro := $1C0D
+    else if MacroChar = ^[ then
+      CharToMacro := $011B  {!!.13}
+    else
     case MacroChar of
-      ^M :
-        CharToMacro := $1C0D;
-      ^[ :                     {!!.13}
-        CharToMacro := $011B;  {!!.13}
       #0..'?' :
         CharToMacro := (ScanCodes[CharCode] shl 8) or CharCode;
       '@'..'_' :
@@ -171,7 +258,7 @@ var
         NumKeys := SLen;
         for I := 1 to SLen do
           KeyArray[I] := CharToMacro(S[I]);
-        KeyArray[I+1] := EndOfMacro;
+        KeyArray[SLen+1] := EndOfMacro;
       end;
     end;
   end;
@@ -183,11 +270,12 @@ var
   end;
 
 begin
-  {$IFDEF Dpmi}                 {!!.20}
-  CSToDSInc := SelectorInc;     {!!.20}
-  {$ELSE}                       {!!.20}
-  CSToDSInc := 0;               {!!.20}
-  {$ENDIF}                      {!!.20}
-
-  Int16Init;
+  MacroInProgress := False;
+  CurrentMacro := nil;
+  WaitCount := 0;
+  WaitFlag := 0;
+  HookInstalled := False;
+  SavedKeyHook := nil;
+  MacroInProgressPtr := @MacroInProgress;
+  CurrentMacroPtr := @CurrentMacro;
 end.

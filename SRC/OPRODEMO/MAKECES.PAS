@@ -6,7 +6,7 @@
 {*                 All rights reserved.                  *}
 {*********************************************************}
 
-{$I OPDEFINE.INC}
+{$I opdefine.inc}
 
 {***************************************************************************
  This unit requires that OPDEFINE.INC activate the following defines:

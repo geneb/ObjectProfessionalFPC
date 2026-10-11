@@ -491,7 +491,7 @@ const
   function InitMainMenu : Boolean;
     {-Initialize the main menu}
   const
-    JointFrame : FrameArray = 'ÑÔÑ¾ÍÍ³³';
+    JointFrame : FrameArray = #$D1#$D4#$D1#$BE#$CD#$CD#$B3#$B3;
   var
     Dummy : Byte;
   begin
@@ -542,7 +542,7 @@ const
           AddItem('Delimiter           00 00',   16, 1, mmDelimiterColor);
           AddItem('Selected delimiter  00 00',   17, 1, mmSelDelimColor);
           AddItem('Protected delimiter 00 00',   18, 1, mmProDelimColor);
-          AddSeparator('Æ', 'Í', 'µ',            19);                   {!!.03}
+          AddSeparator(#$C6, #$CD, #$B5,            19);                   {!!.03}
           AddItem('Load color set',              20, 1, mmLoadColors);  {!!.03}
           AddItem('Save color set',              21, 1, mmSaveColors);  {!!.03}
           ItemsDone;

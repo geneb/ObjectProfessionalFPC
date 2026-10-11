@@ -1,6 +1,6 @@
 {$S-,R-,V-,I-,B-,F+,O+,A-}
 
-{$I OPDEFINE.INC}
+{$I opdefine.inc}
 
 {*********************************************************}
 {*                   OPCTRL.PAS 1.30                     *}
@@ -8,7 +8,7 @@
 {*                 All rights reserved.                  *}
 {*********************************************************}
 
-{$IFDEF Windows}                                                      {!!.20}
+{$IFDEF OPWinTP}                                                      {!!.20}
   !! ERROR: This unit is not compatible with Windows applications !!  {!!.20}
 {$ENDIF}                                                              {!!.20}
 
@@ -90,20 +90,20 @@ const
   dcSelectByChar    = $10000000;
   dcIsDefault       = $20000000;
   dcIsButton        = $40000000;
-  dcIsCluster       = $80000000;
+  dcIsCluster       = Low(LongInt); {was $80000000}
 
   DefControlOptions : LongInt = dcButtonShadow;
   BadControlOptions : LongInt = dcButtonDown+dcSelectByChar+dcIsDefault+
                                 dcIsButton+dcIsCluster+dcForceExit; {!!.11}
 
-  CurControlMarker1 : Char = '¯';
-  CurControlMarker2 : Char = '®';
+  CurControlMarker1 : Char = #$AF;
+  CurControlMarker2 : Char = #$AE;
   DefButtonMarker1  : Char = #26;
   DefButtonMarker2  : Char = #27;
 
-  DefButtonBox      : FrameArray = 'ÉÈ»¼ÍÍºº';
-  DefButtonBoxSel   : FrameArray = 'ÉÈ»¼ÍÍºº';
-  DefButtonBoxDown  : FrameArray = 'ÚÀ¿ÙÄÄ³³';
+  DefButtonBox      : FrameArray = #$C9#$C8#$BB#$BC#$CD#$CD#$BA#$BA;
+  DefButtonBoxSel   : FrameArray = #$C9#$C8#$BB#$BC#$CD#$CD#$BA#$BA;
+  DefButtonBoxDown  : FrameArray = #$DA#$C0#$BF#$D9#$C4#$C4#$B3#$B3;
 
 type
   PointerPtr = ^Pointer;
@@ -388,7 +388,7 @@ procedure CheckBoxesStream(SPtr : IdStreamPtr);
 
 implementation
 
-  {$I OPCTRL.IN1}
+  {$I opctrl.in1}
 
 const
   Ampersand = '&';
@@ -460,30 +460,28 @@ const
     {-Fix up one user variable pointer}
   var
     IP : IdNodePtr;
-    MinO, MaxO : Word;
+    A, RecA : PtrUInt;
   begin
     FixUserVar := False;
 
-    with OS(VarPtr) do begin
-      {is the variable within the user record?}
-      MinO := OS(UserRecPtr).O;
-      MaxO := MinO+UserRecSize-1;
-      if (UserRecPtr <> nil) and (UserRecSize > 0) and
-         (S = OS(UserRecPtr).S) and (O >= MinO) and (O <= MaxO) then begin
-        {store ptEntryUserRec as the segment, and adjust the offset}
-        S := ptEntryUserRec;
-        Dec(O, MinO);
-      end
-      else begin
-        {is the variable's address registered?}
-        IP := IdS.idRegistered.FindPointer(VarPtr);
-        if IP = nil then
-          Exit
-        else with IP^ do begin
-          {store the id code in the segment, the version in the offset}
-          S := idCode;
-          O := idVer;
-        end;
+    { FPC port: the "segment" is the high word and the "offset" the low word
+      of a 32-bit value held in the pointer slot }
+    A := PtrUInt(VarPtr);
+    RecA := PtrUInt(UserRecPtr);
+    {is the variable within the user record?}
+    if (UserRecPtr <> nil) and (UserRecSize > 0) and
+       (A >= RecA) and (A <= RecA+UserRecSize-1) then begin
+      {store ptEntryUserRec as the segment, and adjust the offset}
+      VarPtr := Pointer((PtrUInt(ptEntryUserRec) shl 16) or ((A-RecA) and $FFFF));
+    end
+    else begin
+      {is the variable's address registered?}
+      IP := IdS.idRegistered.FindPointer(VarPtr);
+      if IP = nil then
+        Exit
+      else with IP^ do begin
+        {store the id code in the segment, the version in the offset}
+        VarPtr := Pointer((PtrUInt(idCode) shl 16) or idVer);
       end;
     end;
 
@@ -498,26 +496,25 @@ const
   begin
     RestoreUserVar := False;
 
-    with OS(VarPtr) do
-      {segment has the type code}
-      if S = ptEntryUserRec then
-        {a code of ptEntryUserRec means it's part of the user record}
-        if UserRecPtr = nil then
-          {no user record set up}
-          Exit
-        else begin
-          {offset is relative to start of user record}
-          S := OS(UserRecPtr).S;
-          Inc(O, OS(UserRecPtr).O);
-        end
+    {segment (high word) has the type code}
+    if Word(PtrUInt(VarPtr) shr 16) = ptEntryUserRec then
+      {a code of ptEntryUserRec means it's part of the user record}
+      if UserRecPtr = nil then
+        {no user record set up}
+        Exit
       else begin
-        {segment has the code, offset has the version}
-        IP := IdS.idRegistered.FindByCodeVer(S, O);
-        if IP = nil then
-          Exit
-        else
-          VarPtr := IP^.StorePtr;
-      end;
+        {offset is relative to start of user record}
+        VarPtr := Pointer(PtrUInt(UserRecPtr)+(PtrUInt(VarPtr) and $FFFF));
+      end
+    else begin
+      {segment has the code, offset has the version}
+      IP := IdS.idRegistered.FindByCodeVer(Word(PtrUInt(VarPtr) shr 16),
+                                           Word(PtrUInt(VarPtr)));
+      if IP = nil then
+        Exit
+      else
+        VarPtr := IP^.StorePtr;
+    end;
 
     RestoreUserVar := True;
   end;
@@ -696,7 +693,7 @@ ExitPoint:
     if not EntryField.Load(S) then
       Fail;
 
-    S.Read(dcFlags, Ofs(dcHighPMono)-Ofs(dcFlags)+SizeOf(dcHighPMono));
+    S.Read(dcFlags, PtrUInt(@dcHighPMono)-PtrUInt(@dcFlags)+SizeOf(dcHighPMono));
   end;
 
   procedure Control.Store(var S : IdStream);
@@ -704,7 +701,7 @@ ExitPoint:
   begin
     EntryField.Store(S);
     if S.PeekStatus = 0 then
-      S.Write(dcFlags, Ofs(dcHighPMono)-Ofs(dcFlags)+SizeOf(dcHighPMono));
+      S.Write(dcFlags, PtrUInt(@dcHighPMono)-PtrUInt(@dcFlags)+SizeOf(dcHighPMono));
   end;
 
   procedure Control.cpGetUserVars(var P : Pointer; var UVP : PointerPtr);
@@ -932,8 +929,8 @@ ExitPoint:
             Ch2 := Ch1;
           end
           else begin
-            Ch1 := 'Ü';
-            Ch2 := 'ß';
+            Ch1 := #$DC;
+            Ch2 := #$DF;
           end;
           if ButtonDown then
             FastFill(1, Ch1, Row, Col, SA)
@@ -1128,7 +1125,7 @@ ExitPoint:
     if not Control.Load(S) then
       Fail;
 
-    S.Read(buShadowColor, Ofs(buDefMono)-Ofs(buShadowColor)+SizeOf(buDefMono));
+    S.Read(buShadowColor, PtrUInt(@buDefMono)-PtrUInt(@buShadowColor)+SizeOf(buDefMono));
   end;
 
   procedure PushButton.Store(var S : IdStream);
@@ -1136,7 +1133,7 @@ ExitPoint:
   begin
     Control.Store(S);
     if S.PeekStatus = 0 then
-      S.Write(buShadowColor, Ofs(buDefMono)-Ofs(buShadowColor)+SizeOf(buDefMono));
+      S.Write(buShadowColor, PtrUInt(@buDefMono)-PtrUInt(@buShadowColor)+SizeOf(buDefMono));
   end;
 {$ENDIF}
 

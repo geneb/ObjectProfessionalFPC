@@ -8,7 +8,7 @@
 {*                 All rights reserved.                  *}
 {*********************************************************}
 
-{$I OPDEFINE.INC}
+{$I opdefine.inc}
 
 {***************************************************************************
  This program requires that OPDEFINE.INC activate the following defines:
@@ -57,14 +57,15 @@ uses
   OpPick,
   OpEntry,
   OpMenu,
-  MakeMisc;
+  MakeMisc,
+  OpQkRef;
 
 const
   Copyright        : string[74] = 'DESKPOP Installation Program 1.30 '^G' '+
                                   'Copyright (c) 1992 TurboPower Software';
   ExeName          : PathStr = 'DESKPOP.EXE';
-  MainFrame        : FrameArray = 'ÕÔ¸¾ÍÍ³³';
-  BackdropChar     = '±';
+  MainFrame        : FrameArray = #$D5#$D4#$B8#$BE#$CD#$CD#$B3#$B3;
+  BackdropChar     = #$B1;
   BackdropAttr     = $07;
   {$IFDEF UseMouse}
   MouseChar        : Char = #04;
@@ -241,18 +242,18 @@ const
   miOptions          = 12;
   miQuit             = 13;
 
-  {$I DESKMAIN.ICD}  {configuration data for DESKPOP}
-  {$I TPUI.ICD}      {configuration data for TPUI}
+  {$I deskmain.icd}  {configuration data for DESKPOP}
+  {$I tpui.icd}      {configuration data for TPUI}
 
-  {$I OPBROWSE.ICD}  {configuration data for OPBROWSE}
-  {$I OPCAL.ICD}     {configuration data for OPCAL}
-  {$I OPCALC.ICD}    {configuration data for OPCALC}
-  {$I OPEDITOR.ICD}  {configuration data for OPEDITOR}
-  {$I OPQKREF.ICD}   {configuration data for OPQKREF}
-  {$I OPENTRY.ICD}   {configuration data for OPEDITOR}
-  {$I OPMENU.ICD}    {configuration data for OPMENU}
+  {$I opbrowse.icd}  {configuration data for OPBROWSE}
+  {$I opcal.icd}     {configuration data for OPCAL}
+  {$I opcalc.icd}    {configuration data for OPCALC}
+  {$I opeditor.icd}  {configuration data for OPEDITOR}
+  {$I opqkref.icd}   {configuration data for OPQKREF}
+  {$I opentry.icd}   {configuration data for OPEDITOR}
+  {$I opmenu.icd}    {configuration data for OPMENU}
 
-  {$I DPINST.IN1}   {key selector, key editor, help file generation}
+  {$I dpinst.in1}   {key selector, key editor, help file generation}
 
 type
   BytePtr            = ^Byte;
@@ -508,7 +509,7 @@ var
       wFrame.SetFrameType(MainFrame);
       wFrame.AddShadow(shBR, shSeeThru);
       wFrame.AddHeader(' Configuration Options ', heTC);
-      wFrame.AddCustomScrollBar(frRR, 1, MaxLongInt, 1, 1, '²', '°', dpiColors);
+      wFrame.AddCustomScrollBar(frRR, 1, MaxLongInt, 1, 1, #$B2, #$B0, dpiColors);
 
       esFieldOptionsOn(efClearFirstChar+efBeepOnError);
       SetWrapMode(StopAtEdges);
@@ -774,89 +775,90 @@ var
   function GetColorPtr(ID : Word) : BytePtr;
     {-Point to the attribute pair corresponding to the field}
   var
-    O : Word;
+    P : BytePtr;  {FPC port: points at the variable itself instead of DS:offset}
   begin
+    P := nil;
     case ID of
-      idWindowTextColor     : O := Ofs(TpuiColors.TextColor);
-      idWindowTextMono      : O := Ofs(TpuiColors.TextMono);
-      idWindowFrameColor    : O := Ofs(TpuiColors.FrameColor);
-      idWindowFrameMono     : O := Ofs(TpuiColors.FrameMono);
-      idHeaderActiveColor   : O := Ofs(TpuiColors.HeaderColor);
-      idHeaderActiveMono    : O := Ofs(TpuiColors.HeaderMono);
-      idHeaderInactiveColor : O := Ofs(InactiveColor);
-      idHeaderInactiveMono  : O := Ofs(InactiveMono);
-      idShadowColor         : O := Ofs(TpuiColors.ShadowColor);
-      idShadowMono          : O := Ofs(TpuiColors.ShadowMono);
-      idScrollBarColor      : O := Ofs(TpuiColors.ScrollBarColor);
-      idScrollBarMono       : O := Ofs(TpuiColors.ScrollBarMono);
-      idSliderColor         : O := Ofs(TpuiColors.SliderColor);
-      idSliderMono          : O := Ofs(TpuiColors.SliderMono);
-      idHotSpotColor        : O := Ofs(TpuiColors.HotSpotColor);
-      idHotSpotMono         : O := Ofs(TpuiColors.HotSpotMono);
-      idMouseColor          : O := Ofs(TpuiColors.MouseColor);
-      idMouseMono           : O := Ofs(TpuiColors.MouseMono);
-      idStatusTextColor     : O := Ofs(StatusColor);
-      idStatusTextMono      : O := Ofs(StatusMono);
-      idStatusPromptColor   : O := Ofs(TpuiColors.SelPromptColor);
-      idStatusPromptMono    : O := Ofs(TpuiColors.SelPromptMono);
-      idStatusFieldColor    : O := Ofs(TpuiColors.SelFieldColor);
-      idStatusFieldMono     : O := Ofs(TpuiColors.SelFieldMono);
-      idMenuFrameColor      : O := Ofs(TpuiMenuColors.FrameColor);
-      idMenuFrameMono       : O := Ofs(TpuiMenuColors.FrameMono);
-      idMenuItemColor       : O := Ofs(TpuiMenuColors.TextColor);
-      idMenuItemMono        : O := Ofs(TpuiMenuColors.TextMono);
-      idMenuHighlightColor  : O := Ofs(TpuiMenuColors.HighItemColor);
-      idMenuHighlightMono   : O := Ofs(TpuiMenuColors.HighItemMono);
-      idMenuSelItemColor    : O := Ofs(TpuiMenuColors.SelItemColor);
-      idMenuSelItemMono     : O := Ofs(TpuiMenuColors.SelItemMono);
-      idMenuProItemColor    : O := Ofs(TpuiMenuColors.ProItemColor);
-      idMenuProItemMono     : O := Ofs(TpuiMenuColors.ProItemMono);
-      idPickSelItemColor    : O := Ofs(TpuiColors.SelItemColor);
-      idPickSelItemMono     : O := Ofs(TpuiColors.SelItemMono);
-      idPickProItemColor    : O := Ofs(TpuiColors.ProItemColor);
-      idPickProItemMono     : O := Ofs(TpuiColors.ProItemMono);
-      idDirItemColor        : O := Ofs(DirItemColor);
-      idDirItemMono         : O := Ofs(DirItemMono);
-      idDirAltItemColor     : O := Ofs(TpuiColors.AltItemColor);
-      idDirAltItemMono      : O := Ofs(TpuiColors.AltItemMono);
-      idDirAltSelItemColor  : O := Ofs(TpuiColors.AltSelItemColor);
-      idDirAltSelItemMono   : O := Ofs(TpuiColors.AltSelItemMono);
-      idBrowseTextColor     : O := Ofs(BrowseTextColor);
-      idBrowseTextMono      : O := Ofs(BrowseTextMono);
-      idBlockColor          : O := Ofs(TpuiColors.BlockColor);
-      idBlockMono           : O := Ofs(TpuiColors.BlockMono);
-      idMarkerColor         : O := Ofs(TpuiColors.MarkerColor);
-      idMarkerMono          : O := Ofs(TpuiColors.MarkerMono);
-      idCalcTextColor       : O := Ofs(CalcTextColor);
-      idCalcTextMono        : O := Ofs(CalcTextMono);
-      idCalcHighlightColor  : O := Ofs(CalcHighlightColor);
-      idCalcHighlightMono   : O := Ofs(CalcHighlightMono);
-      idCalcSubheadColor    : O := Ofs(CalcSubheadColor);
-      idCalcSubheadMono     : O := Ofs(CalcSubheadMono);
-      idEditTextColor       : O := Ofs(EditTextColor);
-      idEditTextMono        : O := Ofs(EditTextMono);
-      idEditCtrlColor       : O := Ofs(TpuiColors.CtrlColor);
-      idEditCtrlMono        : O := Ofs(TpuiColors.CtrlMono);
-      idEditHighlightColor  : O := Ofs(TpuiColors.HighlightColor);
-      idEditHighlightMono   : O := Ofs(TpuiColors.HighlightMono);
-      idPhoneItemColor      : O := Ofs(PhoneItemColor);
-      idPhoneItemMono       : O := Ofs(PhoneItemMono);
-      idPhoneSelItemColor   : O := Ofs(PhoneSelItemColor);
-      idPhoneSelItemMono    : O := Ofs(PhoneSelItemMono);
-      idPhonePromptColor    : O := Ofs(PhonePromptColor);
-      idPhonePromptMono     : O := Ofs(PhonePromptMono);
-      idPhoneSelPromptColor : O := Ofs(PhoneSelPromptColor);
-      idPhoneSelPromptMono  : O := Ofs(PhoneSelPromptMono);
-      idPhoneSelFieldColor  : O := Ofs(PhoneSelFieldColor);
-      idPhoneSelFieldMono   : O := Ofs(PhoneSelFieldMono);
-      idPhoneCtrlColor      : O := Ofs(PhoneCtrlColor);
-      idPhoneCtrlMono       : O := Ofs(PhoneCtrlMono);
-      idQkRefDimColor       : O := Ofs(QkRefDimColor);
-      idQkRefDimMono        : O := Ofs(QkRefDimMono);
-      idQkRefHighlightColor : O := Ofs(QkRefHighlightColor);
-      idQkRefHighlightMono  : O := Ofs(QkRefHighlightMono);
+      idWindowTextColor     : P := @TpuiColors.TextColor;
+      idWindowTextMono      : P := @TpuiColors.TextMono;
+      idWindowFrameColor    : P := @TpuiColors.FrameColor;
+      idWindowFrameMono     : P := @TpuiColors.FrameMono;
+      idHeaderActiveColor   : P := @TpuiColors.HeaderColor;
+      idHeaderActiveMono    : P := @TpuiColors.HeaderMono;
+      idHeaderInactiveColor : P := @InactiveColor;
+      idHeaderInactiveMono  : P := @InactiveMono;
+      idShadowColor         : P := @TpuiColors.ShadowColor;
+      idShadowMono          : P := @TpuiColors.ShadowMono;
+      idScrollBarColor      : P := @TpuiColors.ScrollBarColor;
+      idScrollBarMono       : P := @TpuiColors.ScrollBarMono;
+      idSliderColor         : P := @TpuiColors.SliderColor;
+      idSliderMono          : P := @TpuiColors.SliderMono;
+      idHotSpotColor        : P := @TpuiColors.HotSpotColor;
+      idHotSpotMono         : P := @TpuiColors.HotSpotMono;
+      idMouseColor          : P := @TpuiColors.MouseColor;
+      idMouseMono           : P := @TpuiColors.MouseMono;
+      idStatusTextColor     : P := @StatusColor;
+      idStatusTextMono      : P := @StatusMono;
+      idStatusPromptColor   : P := @TpuiColors.SelPromptColor;
+      idStatusPromptMono    : P := @TpuiColors.SelPromptMono;
+      idStatusFieldColor    : P := @TpuiColors.SelFieldColor;
+      idStatusFieldMono     : P := @TpuiColors.SelFieldMono;
+      idMenuFrameColor      : P := @TpuiMenuColors.FrameColor;
+      idMenuFrameMono       : P := @TpuiMenuColors.FrameMono;
+      idMenuItemColor       : P := @TpuiMenuColors.TextColor;
+      idMenuItemMono        : P := @TpuiMenuColors.TextMono;
+      idMenuHighlightColor  : P := @TpuiMenuColors.HighItemColor;
+      idMenuHighlightMono   : P := @TpuiMenuColors.HighItemMono;
+      idMenuSelItemColor    : P := @TpuiMenuColors.SelItemColor;
+      idMenuSelItemMono     : P := @TpuiMenuColors.SelItemMono;
+      idMenuProItemColor    : P := @TpuiMenuColors.ProItemColor;
+      idMenuProItemMono     : P := @TpuiMenuColors.ProItemMono;
+      idPickSelItemColor    : P := @TpuiColors.SelItemColor;
+      idPickSelItemMono     : P := @TpuiColors.SelItemMono;
+      idPickProItemColor    : P := @TpuiColors.ProItemColor;
+      idPickProItemMono     : P := @TpuiColors.ProItemMono;
+      idDirItemColor        : P := @DirItemColor;
+      idDirItemMono         : P := @DirItemMono;
+      idDirAltItemColor     : P := @TpuiColors.AltItemColor;
+      idDirAltItemMono      : P := @TpuiColors.AltItemMono;
+      idDirAltSelItemColor  : P := @TpuiColors.AltSelItemColor;
+      idDirAltSelItemMono   : P := @TpuiColors.AltSelItemMono;
+      idBrowseTextColor     : P := @BrowseTextColor;
+      idBrowseTextMono      : P := @BrowseTextMono;
+      idBlockColor          : P := @TpuiColors.BlockColor;
+      idBlockMono           : P := @TpuiColors.BlockMono;
+      idMarkerColor         : P := @TpuiColors.MarkerColor;
+      idMarkerMono          : P := @TpuiColors.MarkerMono;
+      idCalcTextColor       : P := @CalcTextColor;
+      idCalcTextMono        : P := @CalcTextMono;
+      idCalcHighlightColor  : P := @CalcHighlightColor;
+      idCalcHighlightMono   : P := @CalcHighlightMono;
+      idCalcSubheadColor    : P := @CalcSubheadColor;
+      idCalcSubheadMono     : P := @CalcSubheadMono;
+      idEditTextColor       : P := @EditTextColor;
+      idEditTextMono        : P := @EditTextMono;
+      idEditCtrlColor       : P := @TpuiColors.CtrlColor;
+      idEditCtrlMono        : P := @TpuiColors.CtrlMono;
+      idEditHighlightColor  : P := @TpuiColors.HighlightColor;
+      idEditHighlightMono   : P := @TpuiColors.HighlightMono;
+      idPhoneItemColor      : P := @PhoneItemColor;
+      idPhoneItemMono       : P := @PhoneItemMono;
+      idPhoneSelItemColor   : P := @PhoneSelItemColor;
+      idPhoneSelItemMono    : P := @PhoneSelItemMono;
+      idPhonePromptColor    : P := @PhonePromptColor;
+      idPhonePromptMono     : P := @PhonePromptMono;
+      idPhoneSelPromptColor : P := @PhoneSelPromptColor;
+      idPhoneSelPromptMono  : P := @PhoneSelPromptMono;
+      idPhoneSelFieldColor  : P := @PhoneSelFieldColor;
+      idPhoneSelFieldMono   : P := @PhoneSelFieldMono;
+      idPhoneCtrlColor      : P := @PhoneCtrlColor;
+      idPhoneCtrlMono       : P := @PhoneCtrlMono;
+      idQkRefDimColor       : P := @QkRefDimColor;
+      idQkRefDimMono        : P := @QkRefDimMono;
+      idQkRefHighlightColor : P := @QkRefHighlightColor;
+      idQkRefHighlightMono  : P := @QkRefHighlightMono;
     end;
-    GetColorPtr := Ptr(DSeg, O);
+    GetColorPtr := P;
   end;
 
   {$F+}
@@ -945,7 +947,7 @@ var
       wFrame.AddShadow(shBR, shSeeThru);
       wFrame.AddHeader(' Colors ', heTC);
       wFrame.AddHeaderColor(' Color Mono ', heTR, $1F, $0F);
-      wFrame.AddCustomScrollBar(frRR, 1, MaxLongInt, 1, 1, '²', '°', dpiColors);
+      wFrame.AddCustomScrollBar(frRR, 1, MaxLongInt, 1, 1, #$B2, #$B0, dpiColors);
       SetWrapMode(StopAtEdges);
 
       SetActionProc(GetAction);
@@ -1477,7 +1479,7 @@ var
       wFrame.SetFrameType(MainFrame);
       wFrame.AddShadow(shBR, shSeeThru);
       wFrame.AddHeader(' '+Title+' ', heTC);
-      wFrame.AddCustomScrollBar(frRR, 1, MaxLongInt, 1, 1, '²', '°', dpiColors);
+      wFrame.AddCustomScrollBar(frRR, 1, MaxLongInt, 1, 1, #$B2, #$B0, dpiColors);
       SetWrapMode(StopAtEdges);
 
       SetModifiedAttr($1E, $07);
@@ -1594,10 +1596,10 @@ var
       AddItem('Phone book',       08, 1, miPhoneBook);
       AddItem('Phone editor',     09, 1, miPhoneEditor);
       AddItem('Hotkeys',          10, 1, miHotKeys);
-      AddSeparator('Æ', 'Í', 'µ', 11);
+      AddSeparator(#$C6, #$CD, #$B5, 11);
       AddItem('Colors',           12, 1, miColors);
       AddItem('Options',          13, 1, miOptions);
-      AddSeparator('Æ', 'Í', 'µ', 14);
+      AddSeparator(#$C6, #$CD, #$B5, 14);
       AddItem('Quit',             15, 1, miQuit);
       ItemsDone;
 

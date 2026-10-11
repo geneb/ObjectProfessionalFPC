@@ -70,7 +70,7 @@ const
       AddItem('Move',             02, 1, 02);
       AddItem('Resize',           03, 1, 03);
       AddItem('Zoom',             04, 1, 04);
-      AddSeparator('Ã', 'Ä', '´', 05);
+      AddSeparator(#$C3, #$C4, #$B4, 05);
       AddItem('Block',            06, 1, 05);
         AddFramedSubMenu(4, 9, 20, 14, Vertical, DefWindowFrame);
         AddItem('Change case',    01, 1, 06);
@@ -187,7 +187,7 @@ const
     {-Display the status line for the text editor window}
   const
     StatusMsg =
-      '   <F2> Save file  <F3> New file  <F9> Menu  <Esc> Close  ³ Line ';
+      '   <F2> Save file  <F3> New file  <F9> Menu  <Esc> Close  '#$B3' Line ';
   begin
     with EditWin do begin
       ShowStatusString(StatusMsg, 1, Length(StatusMsg));
@@ -534,8 +534,8 @@ var
     {create blank phone string}
     PSLen := PhoneLen;
     FillChar(PS[1], PSLen, ' ');
-    PS[7] := '³';
-    PS[38] := '³';
+    PS[7] := #$B3;
+    PS[38] := #$B3;
 
     if not MakeBlank then
       with ScrapPhoneRec do begin
@@ -842,7 +842,8 @@ const
   BaudRatesHi : array[br300..br2400] of Byte = ($01, $00, $00);
   BaudRatesLo : array[br300..br2400] of Byte = ($80, $60, $30);
 var
-  ComPortBase : array[ComPortType] of Word absolute $40:0; {Com port base addresses}
+  {FPC port: BIOS data area (40:0) not accessible; no COM ports are found}
+  ComPortBase : array[ComPortType] of Word; {Com port base addresses}
   ComBase : Word; {!!.01}
 
   procedure ComPortBaseCheck; {!!.01}
@@ -868,102 +869,27 @@ var
     HaveModem := False;
   end;
 
+  {FPC port: stubbed because the modem is driven through direct UART I/O ports,
+   which cannot be accessed; ComPortBaseCheck finds no ports so HaveModem is
+   False and these routines are never needed.}
   procedure SaveCommState(var CD : ComData); {!!.01}
     {-Save the state of the communications controllers}
-  var
-    Base : Word absolute ComBase;
   begin
-    with CD do begin
-      {Save the 8259 interrupt enable mask}
-      PicMask := Port[$21];
-
-      {Save the rest of the control state}
-      IERReg := Port[Base+IER]; {Interrupt enable register}
-      inline($EB/$00);
-
-      MCRReg := Port[Base+MCR]; {Modem control register}
-      inline($EB/$00);
-
-      LCRReg := Port[Base+LCR]; {Line control register}
-      inline($EB/$00);
-
-      Port[Base+LCR] := LCRReg or $80; {Enable baud rate divisor registers}
-      inline($EB/$00);
-
-      BRLReg := Port[Base+BRL]; {Baud rate divisor low}
-      inline($EB/$00);
-
-      BRHReg := Port[Base+BRH]; {Baud rate divisor high}
-      inline($EB/$00);
-
-      Port[Base+LCR] := LCRReg; {Restore line control register}
-      inline($EB/$00);
-    end;
   end;
 
   procedure RestoreCommState(var CD : ComData); {!!.01}
     {-Restore the communications chips to their previous state}
-  var
-    Base : Word absolute ComBase;
   begin
-    with CD do begin
-      Port[Base+IER] := IERReg; {Interrupt enable register}
-      inline($EB/$00);
-
-      Port[Base+MCR] := MCRReg; {Modem control register}
-      inline($EB/$00);
-
-      Port[Base+LCR] := LCRReg or $80; {Enable baud rate divisor registers}
-      inline($EB/$00);
-
-      Port[Base+BRL] := BRLReg; {Baud rate low}
-      inline($EB/$00);
-
-      Port[Base+BRH] := BRHReg; {Baud rate high}
-      inline($EB/$00);
-
-      Port[Base+LCR] := LCRReg; {Line control register}
-      inline($EB/$00);
-
-      {Restore the interrupt mask}
-      Port[$21] := PicMask;
-    end;
   end;
 
   procedure ModemSetup;      {!!.01}
     {-Initialize the modem}
-  var
-    Base : Word absolute ComBase;
   begin
-    Port[Base+LCR] := $83; {Set baud rate, No parity, 8 bits}
-    inline($EB/$00);
-    Port[Base+BRL] := BaudRatesLo[DefBaudRate];
-    inline($EB/$00);
-    Port[Base+BRH] := BaudRatesHi[DefBaudRate];
-    inline($EB/$00);
-    Port[Base+LCR] := NoParity;
-    inline($EB/$00);
-    Port[Base+MCR] := $03; {Turn ON DTR and RTS}
   end;
 
   procedure SendStringToModem(S : string); {!!.01}
     {-Send a string to the modem}
-  var
-    Ch : Char;
-    I, J : Word;
   begin
-    {make sure there's a carriage return at the end of the command}
-    S := S+^M;
-
-    {send string to modem}
-    I := 1;
-    repeat
-      Ch := S[I];
-      Inc(I);
-      Port[ComBase+TBR] := Byte(Ch);
-      while Port[ComBase+LSR] < $20 do {wait};
-      for J := 0 to 1000 do {delay};
-    until Ch = ^M;
   end;
 
   procedure DialPhonePrim(PhoneNumber : string);
@@ -1279,7 +1205,7 @@ var
         AdjustFrameCoords(frXL, frYL-2, frXH, frYH);
 
       {add window divider}
-      wFrame.AddSpanHeader('Ã', 'Ä', '´', 2, frTT);
+      wFrame.AddSpanHeader(#$C3, #$C4, #$B4, 2, frTT);
 
       if ClassifyError(GetLastError) = etFatal then begin
         Done;

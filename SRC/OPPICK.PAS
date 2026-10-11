@@ -1,11 +1,11 @@
-{$IFDEF Windows}                                                      {!!.20}
+{$IFDEF OPWinTP}                                                      {!!.20}
   !! ERROR: This unit is not compatible with Windows applications !!  {!!.20}
 {$ENDIF}                                                              {!!.20}
 
 {$R-,S-,I-,V-,B-,F+,O+,A-} {!!.01}
 
 {Conditional defines that may affect this unit}
-{$I OPDEFINE.INC}
+{$I opdefine.inc}
 
 {*********************************************************}
 {*                    OPPICK.PAS 1.30                    *}
@@ -38,7 +38,7 @@ uses
   {$ENDIF}          {!!.03}
   ;
 
-  {$I OPPICK.ICD}  {configuration data}
+  {$I oppick.icd}  {configuration data}
 
   {.F-}
 const
@@ -541,8 +541,8 @@ var
 
 implementation
 
-  {$I OPPICK.IN1}                 {Low level routines and methods}
-  {$I OPPICK.IN2}                 {PickList object}
+  {$I oppick.in1}                 {Low level routines and methods}
+  {$I oppick.in2}                 {PickList object}
 
 begin
   {Initialize command processor}

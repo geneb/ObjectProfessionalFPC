@@ -1,4 +1,4 @@
-{$IFDEF Windows}  {!!.20}
+{$IFDEF OPWinTP}  {!!.20}
   !! This program is not compatible with Windows !!
 {$ENDIF}
 

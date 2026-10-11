@@ -7,12 +7,17 @@
 {*********************************************************}
 
 {Conditional defines that may affect this unit}
-{$I OPDEFINE.INC}
+{$I opdefine.inc}
 
 {.$DEFINE NoPop}  {!!.03}   {If the following directive is defined, POPHELP
                              will be compiled as a non-resident program. The
                              state of this define MUST agree with the
                              identically named define in POPHELP.PAS}
+
+{FPC port: no TSR / DOS memory blocks; behave as when compiled for protected mode}
+{$IFDEF OPFPC}
+  {$DEFINE Dpmi}
+{$ENDIF}
 
 {$IFDEF Dpmi}     {!!.20}   {Force non-resident compile if in pmode}
   {$DEFINE NoPop}
@@ -283,6 +288,8 @@ var
     NoSound;
   end;
 
+{FPC port: SetBlock/PtrDiff/ShrinkHeap (DOS memory block, TP heap) not applicable}
+{$IFNDEF Dpmi}
   function SetBlock(var Paragraphs : Word) : Boolean;
     {-Change size of DOS memory block allocated to this program}
   var
@@ -306,8 +313,6 @@ var
   begin
     PtrDiff := (LongInt(High.S) shl 4+High.O)-(LongInt(Low.S) shl 4+Low.O);
   end;
-
-{$IFNDEF Dpmi} {!!.20}
 
 {$IFDEF Heap6} {New version of ShrinkHeap for TP6}
 
@@ -406,6 +411,17 @@ var
 
 {$ENDIF}  {!!.20}
 
+{$IFDEF OPFPC}
+  procedure SwapVectorsOut;
+    {-FPC port: stubbed because there are no DOS interrupt vectors to swap}
+  begin
+  end;
+
+  procedure SwapVectorsIn;
+    {-FPC port: stubbed because there are no DOS interrupt vectors to swap}
+  begin
+  end;
+{$ELSE}
   procedure SwapVectorsOut;
     {-Custom swap vectors}
   begin
@@ -470,6 +486,7 @@ var
     SetIntVec($3F, SaveVecs[16]);
     SetIntVec($75, SaveVecs[17]);
   end;
+{$ENDIF}
 
   function Execute(Command : String127; ExtraParas : Word) : Word;
     {-Execute a child process}
@@ -485,6 +502,11 @@ var
 
     ComPath := GetEnv('COMSPEC');
     Command := '/C '+Command;
+    {$IFDEF UNIX}
+    {FPC port: no COMSPEC under Unix}
+    ComPath := '/bin/sh';
+    Command := '-c '+Copy(Command, 4, 255);
+    {$ENDIF}
 
     SwapVectorsOut;
     Exec(ComPath, Command);
@@ -1651,6 +1673,7 @@ NewHelpObject:
     {-Gets command line options and sets various parameters.}
   var
     CmdPtr : StringPtr;
+    CmdBuf : String;
     CmdPos : Integer;
     Code : Word;
     Param : String[127];
@@ -1674,7 +1697,11 @@ NewHelpObject:
     StartDB := '';
 
     {Scan command line}
-    CmdPtr:=Ptr(PrefixSeg,$80);
+    {FPC port: no PSP command tail; rebuild it from ParamStr}
+    CmdBuf := '';
+    for Code := 1 to ParamCount do
+      CmdBuf := CmdBuf+' '+ParamStr(Code);
+    CmdPtr := @CmdBuf;
     CmdPos:=1;
     Param := GetParam(CmdPtr, CmdPos);
 

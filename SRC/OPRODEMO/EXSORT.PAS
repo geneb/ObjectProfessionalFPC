@@ -50,4 +50,3 @@ begin
     SortTooManyElements : WriteLn('Too many elements to sort');
   end;
 end.
-

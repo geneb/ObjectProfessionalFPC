@@ -1,10 +1,10 @@
-{$IFDEF Windows}                                                      {!!.20}
+{$IFDEF OPWinTP}                                                      {!!.20}
   !! ERROR: This unit is not compatible with Windows applications !!  {!!.20}
 {$ENDIF}                                                              {!!.20}
 
 {$R-,S-,I-,V-,B-,F+,O+,A-} {!!.01}
 
-{$I OPDEFINE.INC}
+{$I opdefine.inc}
 
 {*********************************************************}
 {*                  OPSELECT.PAS 1.30                    *}
@@ -38,7 +38,7 @@ uses
   {$ENDIF}          {!!.03}
   ;
 
-  {$I OPSELECT.ICD}  {configuration data}
+  {$I opselect.icd}  {configuration data}
 
 {!!.30 Moved from OPFIELD.PAS}
 const
@@ -605,8 +605,8 @@ implementation
 type
   SFPtr = SelectFieldPtr;
 
-  {$I OPSELECT.IN1}  {Selectors, ScrollingSelectors, streams}
-  {$I OPSELECT.IN2}  {SelectField/TextField}  {!!.30}
+  {$I opselect.in1}  {Selectors, ScrollingSelectors, streams}
+  {$I opselect.in2}  {SelectField/TextField}  {!!.30}
 
   {--------------- methods for AbstractSelector's ----------------}
 

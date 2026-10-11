@@ -18,7 +18,7 @@ var
     {Clear IoResult}
     I := IoResult;
     WriteLn('Error handler sees error ', ExitCode:3, ' at ',
-            HexW(OS(ErrorAddr).S), ':', HexW(OS(ErrorAddr).O)); {!!.22}
+            HexW(Word(PtrUInt(ErrorAddr) shr 16)), ':', HexW(Word(PtrUInt(ErrorAddr)))); {!!.22}
     RecoverError := True;
   end;
 begin
@@ -34,4 +34,3 @@ begin
   if ExitCode <> 0 then
     WriteLn('Range error occurred');
 end.
-

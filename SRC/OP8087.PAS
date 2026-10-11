@@ -1,10 +1,10 @@
-{$IFDEF Windows}                                                      {!!.20}
+{$IFDEF OPWinTP}                                                      {!!.20}
   !! ERROR: This unit is not compatible with Windows!!                {!!.20}
 {$ENDIF}                                                              {!!.20}
 
 {$S-,R-,V-,I-,B-,F+,O-,A-}
 
-{$I OPDEFINE.INC}
+{$I opdefine.inc}
 
 {*********************************************************}
 {*                    OP8087.PAS 1.30                    *}
@@ -13,6 +13,14 @@
 {*     and used under license to TurboPower Software     *}
 {*                 All rights reserved.                  *}
 {*********************************************************}
+
+{ FPC port: stubbed because the original unit saved/restored the registers of
+  a real-mode 80x87 (or the Turbo Pascal 8087 emulator) for TSR pop-ups, and
+  detected which of the two was in use.  Under Windows/Linux the FPU is always
+  present, is managed by the operating system, and there is no emulator.  The
+  interface is kept; the routines behave as "FPU present, no emulator".
+  Note: Extended is an 80-bit type on i386 but equals Double on x86_64-win64,
+  so SizeOf(SaveBuffer8087) differs between targets. }
 
 unit Op8087;
   {-Routines to add 80x87 support to pop-up routines}
@@ -47,13 +55,9 @@ function Error8087 : Word;
 
 procedure Reinit8087;
   {-Reinitialize the 8087 chip}
-inline(
-  $9B/$DB/$E3); {FINIT  ;actual}
 
 procedure ReinitEmulator;
   {-Reinitialize the emulator}
-inline(
-  $CD/$37/$E3); {FINIT  ;emulated}
 
 function UseEmulator : Boolean;
   {-Return True if ReinitEmulator should be used rather than Reinit8087}
@@ -62,52 +66,48 @@ function UseEmulator : Boolean;
 
 implementation
 
-var
-  OrigSS : Word;             {value of SSeg when program began}
-
-  {$IFOPT N+}
-    {$L OP8087e.OBJ}
-  {$ELSE}
-    {$L OP8087.OBJ}
-    function Installed_8087 : Boolean; external;
-  {$ENDIF}
-
-  procedure Save8087(var SaveBuf : SaveBuffer8087); external;
-  procedure Restore8087(var SaveBuf : SaveBuffer8087); external;
-  procedure Exceptions8087(On : Boolean); external;
-  function Error8087 : Word; external;
-
-  {$IFOPT N+}
-    function Installed8087 : Boolean;
-    begin
-     {Test8087 values: 0 = no 80x87, 1 = 8087, 2 = 80287, 3 = 80387}
-     Installed8087 := (Test8087 > 0);
-    end;
-  {$ELSE}
-    function Installed8087 : Boolean;
-    begin
-      Installed8087 := Installed_8087;
-    end;
-  {$ENDIF}
-
-  function UseEmulator : Boolean;
-    {-Return True if ReinitEmulator should be used rather than Reinit8087}
-  type
-    Array3 = array[1..3] of Char;
-  const
-    EmuSignature : Array3 = 'emu';
-  var
-    A3P : ^Array3;
+  { FPC port: stubbed because the FPU state belongs to the OS/RTL }
+  procedure Save8087(var SaveBuf : SaveBuffer8087);
   begin
-    {$IFDEF DPMI}               {!!.20}
-    A3P := Ptr(OrigSS, $F0);    {!!.20}
-    {$ELSE}                     {!!.20}
-    A3P := Ptr(OrigSS, $E0);
-    {$ENDIF}                    {!!.20}
-    {using emulator if Test8087 is 0 and emulator's signature is found}
-    UseEmulator := (Test8087 = 0) and (A3P^ = EmuSignature);
+    FillChar(SaveBuf, SizeOf(SaveBuf), 0);
   end;
 
-begin
-  OrigSS := SSeg;
+  { FPC port: stubbed because the FPU state belongs to the OS/RTL }
+  procedure Restore8087(var SaveBuf : SaveBuffer8087);
+  begin
+  end;
+
+  { FPC port: an FPU is always present }
+  function Installed8087 : Boolean;
+  begin
+    Installed8087 := True;
+  end;
+
+  { FPC port: stubbed because exception masks are managed by the RTL }
+  procedure Exceptions8087(On : Boolean);
+  begin
+  end;
+
+  { FPC port: stubbed, no pending 8087 error status is ever reported }
+  function Error8087 : Word;
+  begin
+    Error8087 := 0;
+  end;
+
+  { FPC port: stubbed because the RTL initializes the FPU }
+  procedure Reinit8087;
+  begin
+  end;
+
+  { FPC port: stubbed because there is no 8087 emulator }
+  procedure ReinitEmulator;
+  begin
+  end;
+
+  { FPC port: there is never an emulator }
+  function UseEmulator : Boolean;
+  begin
+    UseEmulator := False;
+  end;
+
 end.

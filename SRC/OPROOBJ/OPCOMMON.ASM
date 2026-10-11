@@ -295,4 +295,3 @@ Pointer STRUC
         Segm    DW      0
 Pointer ENDS
 
-

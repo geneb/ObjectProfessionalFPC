@@ -1,6 +1,6 @@
 {$S-,R-,V-,I-,B-,F-,O-,A-}
 
-{$I OPDEFINE.INC}
+{$I opdefine.inc}
 
 {*********************************************************}
 {*                     OPCMD.PAS 1.30                    *}
@@ -992,7 +992,6 @@ type
   var
     S : String;
     SLen : Byte absolute S;
-    CmdOS : OS absolute cpCmdList;
     Cmd, Key : Word;
   begin
     SLen := 0;
@@ -1007,9 +1006,9 @@ type
 
       if (cpCmdsLeft > 0) then begin
         if FlagIsSet(cpOptions, cpWordCmds) then
-          Inc(CmdOS.O, 2)
+          cpCmdList := Pointer(PtrUInt(cpCmdList)+2)
         else
-          Inc(CmdOS.O);
+          cpCmdList := Pointer(PtrUInt(cpCmdList)+1);
         Dec(cpCmdsLeft);
       end;
       ClearFlag(cpOptions, cpDoingChars);
@@ -1033,7 +1032,6 @@ type
   var
     C : Word;
     UseWords : Boolean;
-    CmdOS : OS absolute cpCmdList;
   label
     Restart;
   begin
@@ -1046,11 +1044,11 @@ Restart:
     else begin
       if UseWords then begin
         C := Word(cpCmdList^);
-        Inc(CmdOS.O, 2);
+        cpCmdList := Pointer(PtrUInt(cpCmdList)+2);
       end
       else begin
         C := Byte(cpCmdList^);
-        Inc(CmdOS.O);
+        cpCmdList := Pointer(PtrUInt(cpCmdList)+1);
       end;
       Dec(cpCmdsLeft);
 

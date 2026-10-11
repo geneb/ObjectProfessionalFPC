@@ -1,10 +1,10 @@
-{$IFDEF Windows}                                                      {!!.20}
+{$IFDEF OPWinTP}                                                      {!!.20}
   !! ERROR: This unit is not compatible with Windows applications !!  {!!.20}
 {$ENDIF}                                                              {!!.20}
 
 {$S-,R-,V-,I-,B-,F+,O+,A-}
 
-{$I OPDEFINE.INC}
+{$I opdefine.inc}
 
 {*********************************************************}
 {*                    OPDOS.PAS 1.30                     *}
@@ -14,16 +14,25 @@
 {*                 All rights reserved.                  *}
 {*********************************************************}
 
+{ FPC port: DOS INT 21h/INT 2Fh/BIOS services were replaced by Free Pascal
+  RTL equivalents (Dos, SysUtils, kernel32 on Windows).
+    - Drives are 'A'..'Z' on Windows; on Unix a single virtual drive 'C'
+      stands for the root file system.
+    - Stubbed (no equivalent): absolute sector read/write, DOS print
+      spooler (PRINT.COM), DTA, DOS memory blocks (SetBlock), file handle
+      table walking, phantom drives, parent/master DOS environments' memory
+      segments.
+    - DOS environment records (EnvRec) are now private memory buffers:
+      EnvSeg is only a validity marker (0 = invalid, 1 = static snapshot,
+      2 = heap allocated) and EnvPtr points to the buffer.
+  Unit OpDos.in2 (the DPMI variant) is no longer used. }
+
 unit OpDos;
   {-Miscellaneous DOS/BIOS call routines}
 
 interface
 
 uses
-  Dpmi,                                                            {!!.20}
-{$IFDEF Dpmi}                                                      {!!.21}
-  WinApi,                                                          {!!.21}
-{$ENDIF}                                                           {!!.21}
   Dos,
   OpString;
 
@@ -46,16 +55,9 @@ type
 type
   EnvRec =
     record
-      EnvSeg : Word;              {Segment of the environment}
-{$IFDEF Dpmi}                                                          {!!.20}
-      EnvLen : LongInt;                                                {!!.20}
-{$ELSE}                                                                {!!.20}
+      EnvSeg : Word;              {Validity marker (FPC port), 0 = invalid}
       EnvLen : Word;              {Usable length of the environment}
-{$ENDIF}                                                               {!!.20}
-      EnvPtr : Pointer;           {Nil except when allocated on heap}
-{$IFDEF Dpmi}                                                          {!!.20}
-      EnvRealMode : Boolean;      {True for a real mode environment}
-{$ENDIF}                                                               {!!.20}
+      EnvPtr : Pointer;           {Environment buffer}
     end;
 
   ExecDosProc = procedure(ActionCode : ActionCodeType; Param : Word);
@@ -80,10 +82,6 @@ const
 function DosVersion : Word;
   {-Returns the DOS version number. High byte has major version number,
     low byte has minor version number. Eg., DOS 3.1 => $0301.}
-  inline(
-    $B4/$30/                 {mov ah,$30}
-    $CD/$21/                 {int $21}
-    $86/$C4);                {xchg ah,al}
 
 function NumberOfDrives : Byte;
   {-Returns the number of logical drives}
@@ -113,7 +111,6 @@ function GetDiskInfo(Drive : Byte; var ClustersAvailable, TotalClusters,
 function GetDiskClass(Drive : Char; var SubstDriveChar : Char) : DiskClass;
   {-Return the disk class for the drive with the specified letter}
 
-{$IFNDEF Dpmi}  {DPMI cannot properly handle the DOS INT 25h/26h calls}
 function ReadDiskSectors(Drive : Word; FirstSect : Longint;
                          NumSects : Word; var Buf) : Boolean;
   {-Read absolute disk sectors.}
@@ -121,7 +118,6 @@ function ReadDiskSectors(Drive : Word; FirstSect : Longint;
 function WriteDiskSectors(Drive : Word; FirstSect : Longint;
                           NumSects : Word; var Buf) : Boolean;
   {-Write absolute disk sectors.}
-{$ENDIF}
 
 function GetFileMode(FName : string; var Attr : Word) : Byte;
   {-Returns a file's attribute in Attr and the DOS error code as the function
@@ -321,466 +317,279 @@ function SetMediaID(Drive : Char;
 
 implementation
 
-type
-  SegOfs = record
-             O, S : Word;
-           end;
-  LongRec = record
-              LowWord, HighWord : Word; {structure of a LongInt}
-            end;
+uses
+{$IFDEF UNIX}
+  Unix,
+{$ENDIF}
+  SysUtils;
 
+type
   EnvArray = array[0..32767] of Char;
   EnvArrayPtr = ^EnvArray;
 
-  {text buffer}
-  TextBuffer = array[0..65520] of Byte;
-var
-  Regs : Registers;
-const                         {!!.02}
-  DSReadDrive  : Byte = $FF;  {!!.02}
-  DSWriteDrive : Byte = $FF;  {!!.02}
-  DSReadBig    : Byte = $00;  {!!.02}
-  DSWriteBig   : Byte = $00;  {!!.02}
-
-{$IFDEF Dpmi}                                    {!!.21}
-  {temp selector used in PRINT.COM calls}        {!!.21}
-  TempSele : Word = $0000;                       {!!.21}
-{$ENDIF}                                         {!!.21}
-
-  {$L OPDISK.OBJ}
-
-  function NumberOfDrives : Byte; external;
-  procedure SelectDrive(Drive : Char); external;
-  function IsPhantom(Drive : Char) : Boolean; external;
-  function DefaultDrive : Char; external;
-  function GetDiskInfo(Drive : Byte; var ClustersAvailable, TotalClusters,
-                       BytesPerSector, SectorsPerCluster : Word) : Boolean;
-    external;
-
-{$IFNDEF Dpmi}
-  function ReadDiskSectors(Drive : Word; FirstSect : Longint;
-                           NumSects : Word; var Buf) : Boolean;
-    external;
-  function WriteDiskSectors(Drive : Word; FirstSect : Longint;
-                            NumSects : Word; var Buf) : Boolean;
-    external;
+const
+{$IFDEF UNIX}
+  PathListSep = ':';
+  DirSep = '/';
+  NullDevName = '/dev/null';
+  PrnDevName = '/dev/lp0';
+{$ELSE}
+  PathListSep = ';';
+  DirSep = '\';
+  NullDevName = 'NUL';
+  PrnDevName = 'PRN';
 {$ENDIF}
 
-{$IFDEF Dpmi}               {!!.20}
-  {$I OPDOS.IN2}            {!!.20}
-{$ELSE}                     {!!.20}
-  {$I OPDOS.IN1}
-{$ENDIF}                    {!!.20}
+{$IFDEF WINDOWS}
+  function GetDriveTypeA(Root : PChar) : LongWord; stdcall;
+    external 'kernel32.dll' name 'GetDriveTypeA';
+  function GetDiskFreeSpaceA(Root : PChar;
+                             var SectPerClus, BytesPerSect,
+                             FreeClus, TotalClus : LongWord) : LongBool; stdcall;
+    external 'kernel32.dll' name 'GetDiskFreeSpaceA';
+  function GetVolumeInformationA(Root, VolName : PChar; VolNameSize : LongWord;
+                                 Serial, MaxComp, Flags : Pointer;
+                                 FsName : PChar;
+                                 FsNameSize : LongWord) : LongBool; stdcall;
+    external 'kernel32.dll' name 'GetVolumeInformationA';
+  function SetVolumeLabelA(Root, VolLabel : PChar) : LongBool; stdcall;
+    external 'kernel32.dll' name 'SetVolumeLabelA';
+  function GetLastError : LongWord; stdcall;
+    external 'kernel32.dll' name 'GetLastError';
+  function GetFileType(H : PtrUInt) : LongWord; stdcall;
+    external 'kernel32.dll' name 'GetFileType';
+{$ENDIF}
+
+  function AddSep(S : string) : string;
+    {-Add a directory separator unless S is empty or already ends with one}
+  begin
+    if (S <> '') and not (S[Length(S)] in ['\', '/', ':']) then
+      S := S+DirSep;
+    AddSep := S;
+  end;
+
+  function DosVersion : Word;
+    {-Returns the DOS version number. High byte has major version number,
+      low byte has minor version number. Eg., DOS 3.1 => $0301.}
+  begin
+    {FPC port: no DOS; report a version new enough for all feature tests}
+    DosVersion := $0700;
+  end;
+
+{$IFDEF WINDOWS}
+  function DriveType(Drive : Char) : LongWord;
+    {-Windows drive type; 0 or 1 for non-existing drives}
+  var
+    Root : array[0..3] of Char;
+  begin
+    Drive := UpCase(Drive);
+    if not (Drive in ['A'..'Z']) then begin
+      DriveType := 0;
+      Exit;
+    end;
+    Root[0] := Drive;
+    Root[1] := ':';
+    Root[2] := '\';
+    Root[3] := #0;
+    DriveType := GetDriveTypeA(Root);
+  end;
+{$ENDIF}
+
+  function NumberOfDrives : Byte;
+    {-Returns the number of logical drives}
+  {$IFDEF WINDOWS}
+  var
+    C : Char;
+    N : Byte;
+  begin
+    N := 3;
+    for C := 'A' to 'Z' do
+      if (DriveType(C) > 1) and (Ord(C)-Ord('A')+1 > N) then
+        N := Ord(C)-Ord('A')+1;
+    NumberOfDrives := N;
+  end;
+  {$ELSE}
+  begin
+    {FPC port: Unix has a single virtual drive 'C' (the root)}
+    NumberOfDrives := 3;
+  end;
+  {$ENDIF}
+
+  function DefaultDrive : Char;
+    {-Returns the default drive as an uppercase letter}
+  {$IFDEF WINDOWS}
+  var
+    S : string;
+  begin
+    GetDir(0, S);
+    if (Length(S) >= 2) and (S[2] = ':') then
+      DefaultDrive := UpCase(S[1])
+    else
+      DefaultDrive := 'C';
+  end;
+  {$ELSE}
+  begin
+    DefaultDrive := 'C';
+  end;
+  {$ENDIF}
+
+  function IsPhantom(Drive : Char) : Boolean;
+    {-Return True if the specified drive is a phantom drive}
+  begin
+    {FPC port: stubbed because phantom (logical A:/B:) drives do not exist}
+    IsPhantom := False;
+  end;
+
+  procedure SelectDrive(Drive : Char);
+    {-Selects the specified drive as default if possible}
+  {$IFDEF WINDOWS}
+  var
+    S : string;
+    IO : Integer;
+  begin
+    Drive := UpCase(Drive);
+    if DriveType(Drive) <= 1 then
+      Exit;
+    GetDir(Ord(Drive)-Ord('A')+1, S);
+    ChDir(S);
+    IO := IoResult;
+  end;
+  {$ELSE}
+  begin
+    {FPC port: single virtual drive on Unix, nothing to select}
+  end;
+  {$ENDIF}
 
   function ValidDrive(Drive : Char) : Boolean;
     {-Return True if the specified drive is valid}
-  var
-    CurDrive : Char;
   begin
-    if IsPhantom(Drive) then                   {!!.30}
-      ValidDrive := False                      {!!.30}
-    else begin                                 {!!.30}
-      Drive := UpCase(Drive);  {!!.11}
-      CurDrive := DefaultDrive;
-      SelectDrive(Drive);
-      ValidDrive := (DefaultDrive = Drive);
-      SelectDrive(CurDrive);
-    end;                                       {!!.30}
+    Drive := UpCase(Drive);
+    {$IFDEF WINDOWS}
+    ValidDrive := DriveType(Drive) > 1;
+    {$ELSE}
+    ValidDrive := (Drive = 'C');
+    {$ENDIF}
   end;
 
-{$IFDEF Dpmi}  {!!.20 - Additions for protected mode}
+  function PhantomExists : Boolean;
+  begin
+    PhantomExists := False;
+  end;
+
+  procedure SelectPhantom(Drive : Char);
+    {-Select a phantom drive as default if possible}
+  begin
+    {FPC port: stubbed because phantom drives do not exist}
+  end;
+
+  function GetDiskInfo(Drive : Byte; var ClustersAvailable, TotalClusters,
+                       BytesPerSector, SectorsPerCluster : Word) : Boolean;
+    {-Return technical info about the specified drive (0 = default)}
+  {$IFDEF WINDOWS}
+  var
+    Root : array[0..3] of Char;
+    SPC, BPS, Free, Total : LongWord;
+  begin
+    GetDiskInfo := False;
+    if Drive = 0 then
+      Root[0] := DefaultDrive
+    else
+      Root[0] := Chr(Ord('A')+Drive-1);
+    Root[1] := ':';
+    Root[2] := '\';
+    Root[3] := #0;
+    if not GetDiskFreeSpaceA(Root, SPC, BPS, Free, Total) then
+      Exit;
+    if Free > $FFFF then
+      Free := $FFFF;
+    if Total > $FFFF then
+      Total := $FFFF;
+    ClustersAvailable := Free;
+    TotalClusters := Total;
+    BytesPerSector := BPS;
+    SectorsPerCluster := SPC;
+    GetDiskInfo := True;
+  end;
+  {$ELSE}
+  var
+    Free, Total : Int64;
+    SPC : LongInt;
+  begin
+    GetDiskInfo := False;
+    if not ((Drive = 0) or (Drive = 3)) then
+      Exit;
+    Total := Dos.DiskSize(0);
+    Free := Dos.DiskFree(0);
+    if (Total < 0) or (Free < 0) then
+      Exit;
+    {fake 512 byte sectors, scale clusters so the counts fit in a Word}
+    SPC := 1;
+    while (Total div (512*SPC) > $FFFF) and (SPC < 32768) do
+      SPC := SPC*2;
+    BytesPerSector := 512;
+    SectorsPerCluster := SPC;
+    TotalClusters := Total div (512*SPC);
+    ClustersAvailable := Free div (512*SPC);
+    GetDiskInfo := True;
+  end;
+  {$ENDIF}
 
   function GetDiskClass(Drive : Char; var SubstDriveChar : Char) : DiskClass;
     {-Return the disk class for the drive with the specified letter}
-    {-This routine uses two undocumented DOS function ($32 and $52).
-      Information about these functions was obtained from Terry Dettmann's DOS
-      Programmer's Reference (Que, 1988) and Undocumented DOS (Addison-Wesley,
-      1990).}
-  type
-    NovellTable = array[1..32] of Byte;
-    DriveParameterBlock =
-      record
-        DriveNum, DeviceDriverUnit : Byte;
-        BytesPerSector : Word;
-        SectorsPerCluster, ShiftFactor : Byte;
-        BootSectors : Word;
-        FatCopies : Byte;
-        RootDirEntries, FirstDataSector, HighestCluster : Word;
-        case Byte of
-          0 : (SectorsPerFat23 : Byte;
-               FirstDirSector23 : Word;
-               DeviceDriver23 : Pointer;
-               MediaDescriptor23 : Byte;
-               AccessFlag23 : Byte;
-               Next23 : Pointer;
-               Reserved23 : LongInt);
-          1 : (SectorsPerFat45 : Word;
-               FirstDirSector45 : Word;
-               DeviceDriver45 : Pointer;
-               MediaDescriptor45 : Byte;
-               AccessFlag45 : Byte;
-               Next45 : Pointer;
-               Reserved45 : LongInt);
-      end;
+  {$IFDEF WINDOWS}
   var
-    Ver, DN : Byte;
-    MediaDescriptor : Byte;
-    SectorsPerFat : Word;
-    Found : WordBool;
-    pDPBP, DPBP : ^DriveParameterBlock;
-    NTP : ^NovellTable;
-    Sele : Word;
-    Continue : WordBool;
-    Regs : DPMIRegisters;
-    CDRI : Boolean;
-    CDRN : Word;
-  Label
-    WalkSFT, Evaluate, ExitPoint;
-
-    function CDRomInstalled : Boolean;
-    var
-      R : DpmiRegisters;
-    begin
-      FillChar(R, SizeOf(R), 0);
-      with R do begin
-        AX := $1500;
-        if SimulateRealModeInt($2F, R) <> 0 then ;
-        CDRomInstalled := (DoubleWord(AX).LoWord <> $FFFF) and         {!!.21}
-                          (DoubleWord(BX).LoWord <> 0);                {!!.21}
-      end;
-    end;
-
-    {!!.21 - Rewritten}
-    function IsDriveCDROM(Drive : Char) : Boolean;
-    var
-      R : DpmiRegisters;
-      D : Word;
-    begin
-      IsDriveCDROM := False;
-      FillChar(R, SizeOf(R), 0);
-      with R do begin
-        AX := $1500;
-        if SimulateRealModeInt($2F, R) <> 0 then ;
-        {if AX=$FFFF, GRAPHICS.COM interfered with things}
-        if DoubleWord(AX).LoWord = $FFFF then
-          Exit;
-        if BX <> 0 then begin
-          D := Ord(Upcase(Drive))-Ord('A');
-          IsDriveCDROM := (D >= CX) and (D <= (CX+BX-1));
-        end;
-      end;
-    end;
-
+    Size : Int64;
   begin
-    {assume failure}
     GetDiskClass := InvalidDrive;
-    {assume that this is not a SUBSTituted drive}
     SubstDriveChar := Drive;
-
-    {convert drive letter to drive number}
-    Drive := Upcase(Drive);
-    if IsPhantom(Drive) then
-      Exit;
-
-    case Drive of
-      'A'..'Z' : DN := Ord(Drive)-Ord('A');
-      else Exit;
-    end;
-
-    {check for CDRom installed}
-    CDRI := CDRomInstalled;
-
-    {we need a selector for the following}
-    if GetSelectorForRealMem(nil, $FFFF, Sele) <> 0 then
-      Exit;
-
-    {get DOS version number}
-    Ver := Hi(DosVersion);
-
-    {get pointer to drive parameter block}
-    asm
-      mov     ah,32h
-      mov     dl,DN
-      inc     dl
-      push    ds
-      int     21h
-      mov     dx,ds
-      pop     ds
-      cmp     al,0FFh
-      je      WalkSFT
-      mov     word ptr pDPBP,bx
-      mov     word ptr pDPBP+2,dx
-      jmp     Evaluate
-    end;
-WalkSFT:
-    {DPMI16BI doesn't support this call, so virtualize it}
-    FillChar(Regs, SizeOf(Regs), 0);
-    Regs.AX := $5200;
-    if SimulateRealModeInt($21, Regs) <> 0 then
-      goto ExitPoint;
-    if SetSegmentBaseAddr(Sele, Linear(Ptr(Regs.ES, Regs.BX))) <> 0 then
-      Goto ExitPoint;
-    DPBP := Ptr(MemW[Sele:2], MemW[Sele:0]);
-    if SetSegmentBaseAddr(Sele, Linear(DPBP)) <> 0 then
-      Goto ExitPoint;
-    Continue := Word(DPBP) <> $FFFF;
-    pDPBP := Ptr(Sele, 0);
-
-    Found := False;
-    while (Word(DPBP) <> $FFFF) and not Found do begin
-      if pDPBP^.DriveNum = DN then
-        Found := True
-      else if (Ver < 4) or (Ver >= 10) then                           {!!.21}
-        Move(pDPBP^.Next23, DPBP, SizeOf(DPBP))
-      else
-        Move(pDPBP^.Next45, DPBP, SizeOf(DPBP));
-
-      Continue := Word(DPBP) <> $FFFF;
-      if (not Found) and Continue then begin
-        if SetSegmentBaseAddr(Sele, Linear(DPBP)) <> 0 then
-          Goto ExitPoint;
-      end;
-    end;
-    if not Found then begin
-      if (CDRI) and (IsDriveCDRom(Drive)) then begin    {moved up}   {!!.22}
-        GetDiskClass := CDRomDisk;                                   {!!.22}
-        goto ExitPoint;                                              {!!.22}
-      end;                                                           {!!.22}
-      {386MAX 6.01 doesn't support this call, so virtualize it}
-      FillChar(Regs, SizeOf(Regs), 0);
-      Regs.SI := 0;
-      Regs.ES := 0;
-      Regs.AX := $EF01;
-      if SimulateRealModeInt($21, Regs) <> 0 then
-        goto ExitPoint;
-      if (Regs.ES = 0) and (Regs.SI = 0) then
-        goto ExitPoint;
-      if SetSegmentBaseAddr(Sele, Linear(Ptr(Regs.ES, Regs.SI))) <> 0 then
-        goto ExitPoint;
-      NTP := Ptr(Sele, 0);
-      if NTP^[DN+1] and $03 <> 0 then
-        GetDiskClass := NovellDrive;                                 {!!.22}
-      Goto ExitPoint;
-    end;
-  Evaluate:
-      with pDPBP^ do begin
-        if (Ver < 4) or (Ver >= 10) then begin                      {!!.21}
-          MediaDescriptor := MediaDescriptor23;
-          SectorsPerFat := SectorsPerFat23;
-        end
-        else begin
-          MediaDescriptor := MediaDescriptor45;
-          SectorsPerFat := SectorsPerFat45;
-        end;
-
-        {check for SUBSTituted drive}
-        if (DriveNum <> DN) then begin
-          GetDiskClass := SubstDrive;
-          SubstDriveChar := Char(Ord('A')+DriveNum);
-        end
-        else if (FatCopies = 1) then
-          {RAM disks have one copy of File Allocation Table}
-          GetDiskClass := RamDisk
-        else if (MediaDescriptor = $F8) then
-          {MediaDescriptor of $F8 indicates hard disk}
-          GetDiskClass := HardDisk
-        else if (MediaDescriptor >= $FC) and (SectorsPerFat <> 2) then
-          {Bernoulli drives have more than 2 sectors per FAT}
-          GetDiskClass := Bernoulli
-        else if (MediaDescriptor >= $F9) then
-          {media descriptors >= $F9 are for floppy disks}
-          case HighestCluster of
-             355 : GetDiskClass := Floppy360;
-             714,
-            1423 : GetDiskClass := Floppy720;
-            2372 : GetDiskClass := Floppy12;
-            else   GetDiskClass := OtherFloppy;
-          end
-        else if (MediaDescriptor = $F0) and (HighestCluster = 2848) then
-          {it's a 1.44 meg floppy}
-          GetDiskClass := Floppy144
-        else if (CDRI) and (IsDriveCDRom(Drive)) then
-          {it's a CDRom}
-          GetDiskClass := CDRomDisk
-        else
-          {unable to classify disk/drive}
-          GetDiskClass := UnknownDisk;
-      end;
-    ExitPoint:
-      if FreeLDTDescriptor(Sele) = 0 then ;
-  end;
-
-{$ELSE}
-
-  function GetDiskClass(Drive : Char; var SubstDriveChar : Char) : DiskClass;
-    {-Return the disk class for the drive with the specified letter}
-    {-This routine uses two undocumented DOS function ($32 and $52).
-      Information about these functions was obtained from Terry Dettmann's DOS
-      Programmer's Reference (Que, 1988) and Undocumented DOS (Addison-Wesley,
-      1990).}
-  type                                {!!.13} {rewritten}
-    NovellTable = array[1..32] of Byte;
-    DriveParameterBlock =
-      record
-        DriveNum, DeviceDriverUnit : Byte;
-        BytesPerSector : Word;
-        SectorsPerCluster, ShiftFactor : Byte;
-        BootSectors : Word;
-        FatCopies : Byte;
-        RootDirEntries, FirstDataSector, HighestCluster : Word;
-        case Byte of
-          0 : (SectorsPerFat23 : Byte;
-               FirstDirSector23 : Word;
-               DeviceDriver23 : Pointer;
-               MediaDescriptor23 : Byte;
-               AccessFlag23 : Byte;
-               Next23 : Pointer;
-               Reserved23 : LongInt);
-          1 : (SectorsPerFat45 : Word;
-               FirstDirSector45 : Word;
-               DeviceDriver45 : Pointer;
-               MediaDescriptor45 : Byte;
-               AccessFlag45 : Byte;
-               Next45 : Pointer;
-               Reserved45 : LongInt);
-      end;
-  var
-    Ver, DN : Byte;
-    MediaDescriptor : Byte;
-    SectorsPerFat : Word;
-    DPBP : ^DriveParameterBlock;
-    NTP : ^NovellTable;
-    CDRI : Boolean;                       {!!.20 - begin}
-    CDRN : Word;
-    Regs : Registers;
-
-    function CDRomInstalled : Boolean;
-    var
-      R : Registers;
-    begin
-      FillChar(R, SizeOf(R), 0);
-      with R do begin
-        AX := $1500;
-        Intr($2F, R);
-        CDRomInstalled := (AX <> $FFFF) and (BX <> 0);               {!!.21}
-      end;
-    end;
-
-    {!!.21 - Rewritten}
-    function IsDriveCDROM(Drive : Char) : Boolean;
-    var
-      R : Registers;
-      D : Word;
-    begin
-      IsDriveCDROM := False;
-      FillChar(R, SizeOf(R), 0);
-      with R do begin
-        AX := $1500;
-        Intr($2F, R);
-        {if AX=$FFFF, GRAPHICS.COM interfered with things}
-        if AX = $FFFF then
-          Exit;
-        if BX <> 0 then begin
-          D := Ord(Upcase(Drive))-Ord('A');
-          IsDriveCDRom := (D >= CX) and (D <= CX+BX-1);
-        end;
-      end;
-    end;                                  {!!.20 - end}
-
-  begin
-    {assume failure}
-    GetDiskClass := InvalidDrive;
-
-    {assume that this is not a SUBSTituted drive}
-    SubstDriveChar := Drive;
-
-    {convert drive letter to drive number}
-    Drive := Upcase(Drive);
-    if IsPhantom(Drive) then                        {!!.30}
-      Exit;                                         {!!.30}
-    case Drive of
-      'A'..'Z' : DN := Ord(Drive)-Ord('A');
-      else Exit;
-    end;
-
-    {check for CDRom driver installed}              {!!.20}
-    CDRI := CDRomInstalled;                         {!!.20}
-
-    {get DOS version number}
-    Ver := Hi(DosVersion);
-
-    with Regs do begin
-      {get pointer to drive parameter block}
-      AH := $32;
-      DL := DN+1;
-      MsDos(Regs);
-
-      if (AL <> $FF) then
-        DPBP := Ptr(DS,BX)
-      else if (CDRI) and (IsDriveCDRom(Drive)) then begin    {!!.21 - begin}
-        GetDiskClass := CDRomDisk;
-        Exit;
-      end
-      else begin
-        {see if it's a Novell drive}
-        AX := $EF01;
-        ES := 0;
-        SI := 0;
-        MsDos(Regs);
-        NTP := Ptr(ES,SI);
-        if NTP <> nil then
-          if NTP^[DN+1] and $03 <> 0 then
-            GetDiskClass := NovellDrive;
-        Exit;                                                {!!.21 - end}
-      end;
-
-      with DPBP^ do begin
-        if (Ver < 4)or (Ver >= 10) then begin                {!!.21}
-          MediaDescriptor := MediaDescriptor23;
-          SectorsPerFat := SectorsPerFat23;
-        end
-        else begin
-          MediaDescriptor := MediaDescriptor45;
-          SectorsPerFat := SectorsPerFat45;
-        end;
-
-        {check for SUBSTituted drive}
-        if (DriveNum <> DN) then begin
-          GetDiskClass := SubstDrive;
-          SubstDriveChar := Char(Ord('A')+DriveNum);
-        end
-        else if (FatCopies = 1) then
-          {RAM disks have one copy of File Allocation Table}
-          GetDiskClass := RamDisk
-        else if (MediaDescriptor = $F8) then
-          {MediaDescriptor of $F8 indicates hard disk}
-          GetDiskClass := HardDisk
-        else if (MediaDescriptor >= $FC) and (SectorsPerFat <> 2) then
-          {Bernoulli drives have more than 2 sectors per FAT}
-          GetDiskClass := Bernoulli
-        else if (MediaDescriptor >= $F9) then
-          {media descriptors >= $F9 are for floppy disks}
-          case HighestCluster of
-             355 : GetDiskClass := Floppy360;
-             714,
-            1423 : GetDiskClass := Floppy720;
-            2372 : GetDiskClass := Floppy12;
-            else   GetDiskClass := OtherFloppy;
-          end
-        else if (MediaDescriptor = $F0) and (HighestCluster = 2848) then
-          {it's a 1.44 meg floppy}
-          GetDiskClass := Floppy144
-        else if (CDRI) and (IsDriveCDRom(Drive)) then              {!!.20}
-          {it's a CDRom}                                           {!!.20}
-          GetDiskClass := CDRomDisk                                {!!.20}
-        else
-          {unable to classify disk/drive}
-          GetDiskClass := UnknownDisk;
-      end;
+    Drive := UpCase(Drive);
+    case DriveType(Drive) of
+      2 : begin {removable}
+            Size := Dos.DiskSize(Ord(Drive)-Ord('A')+1);
+            if Size < 0 then
+              GetDiskClass := OtherFloppy
+            else if Size <= 400000 then
+              GetDiskClass := Floppy360
+            else if Size <= 800000 then
+              GetDiskClass := Floppy720
+            else if Size <= 1300000 then
+              GetDiskClass := Floppy12
+            else if Size <= 1500000 then
+              GetDiskClass := Floppy144
+            else
+              GetDiskClass := OtherFloppy;
+          end;
+      3 : GetDiskClass := HardDisk;
+      4 : GetDiskClass := NovellDrive; {network drive}
+      5 : GetDiskClass := CDRomDisk;
+      6 : GetDiskClass := RamDisk;
     end;
   end;
+  {$ELSE}
+  begin
+    SubstDriveChar := Drive;
+    if UpCase(Drive) = 'C' then
+      GetDiskClass := HardDisk
+    else
+      GetDiskClass := InvalidDrive;
+  end;
+  {$ENDIF}
 
-{$ENDIF}
+  function ReadDiskSectors(Drive : Word; FirstSect : Longint;
+                           NumSects : Word; var Buf) : Boolean;
+    {-Read absolute disk sectors.}
+  begin
+    {FPC port: stubbed because absolute sector access (INT 25h) is not available}
+    ReadDiskSectors := False;
+  end;
+
+  function WriteDiskSectors(Drive : Word; FirstSect : Longint;
+                            NumSects : Word; var Buf) : Boolean;
+    {-Write absolute disk sectors.}
+  begin
+    {FPC port: stubbed because absolute sector access (INT 26h) is not available}
+    WriteDiskSectors := False;
+  end;
 
   function GetFileMode(FName : string; var Attr : Word) : Byte;
     {-Returns a file's attribute in Attr and the DOS error code as the function
@@ -789,73 +598,29 @@ WalkSFT:
     F : file;
   begin
     Assign(F, FName);
-    {call routine in Turbo's DOS unit to get the attribute}
+    {call routine in the Dos unit to get the attribute}
     GetFAttr(F, Attr);
     GetFileMode := DosError;
   end;
 
   function FlushDosBuffers(var F) : Boolean;
     {-Flush DOS's buffers for the specified file}
-  var
-    Handle : Word absolute F;
   begin
-    FlushDosBuffers := False;
-    with Regs do begin
-      {dupe the file handle}
-      AH := $45;
-      BX := Handle;
-      MsDos(Regs);
-      if Odd(Flags) then
-        Exit;
-
-      {close the duped file}
-      BX := AX;
-      AH := $3E;
-      MsDos(Regs);
-      if Odd(Flags) then
-        Exit;
-    end;
-    FlushDosBuffers := True;
+    {FPC port: F is a file variable; its handle is the first field}
+    FlushDosBuffers := SysUtils.FileFlush(FileRec(F).Handle);
   end;
 
   procedure SetDta(DTAptr : Pointer);
     {-Set the DOS DTA to point to DTA}
-  type
-    OS =
-      record
-        O, S : Word;
-      end;
-  {$IFDEF DPMI} {!!.21 new section for DPMI}
-  var
-    Regs : DpmiRegisters;
   begin
-    FillChar(Regs, SizeOf(DpmiRegisters), 0);
-    with Regs do begin
-      AX := $1A00;
-      DS := OS(DTAptr).S;
-      DX := OS(DTAptr).O;
-      if SimulateRealModeInt($21, Regs) <> 0 then ;
-    end;
+    {FPC port: stubbed because there is no DTA}
   end;
-  {$ELSE}
-  begin
-    with Regs do begin
-      AH := $1A;
-      DS := OS(DTAptr).S;    {!!.20}
-      DX := OS(DTAptr).O;    {!!.20}
-      MsDos(Regs);
-    end;
-  end;
-  {$ENDIF}
 
   procedure GetDta(var DTAptr : Pointer);
     {-Return the DOS DTA pointer}
   begin
-    with Regs do begin
-      AH := $2F;
-      MsDos(Regs);
-      DTAptr := Ptr(ES, BX);
-    end;
+    {FPC port: stubbed because there is no DTA}
+    DTAptr := nil;
   end;
 
   function ParsePath(var InputPath, SearchPath, LeadInPath : string) : Boolean;
@@ -867,22 +632,26 @@ WalkSFT:
     Attr : Word;
 
     function IsPath(S : string) : Boolean;
-      {-Return True if S is empty or ends with ':' or '\'}
+      {-Return True if S is empty or ends with a drive colon or separator}
     var
       SLen : Byte absolute S;
     begin
       {check last character in S}
-      case S[SLen] of
-        ':' : IsPath := (SLen = 2);
-        '\' : IsPath := True;
-        '.' : IsPath := (SLen = 1) or (S = '..') or
-                        ((SLen > 2) and                      {!!.03}
-                         ((Pos('\..', S) = (SLen - 2)) or    {!!.03}
-                          (Pos(':.', S)  = (SLen - 1)) or    {!!.10}
-                          (Pos(':..', S) = (SLen - 2)) )     {!!.03}
-                        );                                   {!!.03}
-        else IsPath := (SLen = 0); {True if string is empty}
-      end;
+      if SLen = 0 then
+        IsPath := True
+      else
+        case S[SLen] of
+          ':' : IsPath := (SLen = 2);
+          '\' : IsPath := True;
+          '/' : IsPath := True;
+          '.' : IsPath := (SLen = 1) or (S = '..') or
+                          ((SLen > 2) and                      {!!.03}
+                           ((Pos(DirSep+'..', S) = (SLen - 2)) or  {!!.03}
+                            (Pos(':.', S)  = (SLen - 1)) or    {!!.10}
+                            (Pos(':..', S) = (SLen - 2)) )     {!!.03}
+                          );                                   {!!.03}
+          else IsPath := False;
+        end;
     end;
 
     function NameIsValid(S : string) : Boolean; {!!.10}
@@ -891,7 +660,11 @@ WalkSFT:
     begin
       NameIsValid := False;
       for I := 1 to Length(S) do
+        {$IFDEF UNIX}
+        if S[I] = #0 then
+        {$ELSE}
         if S[I] in [#0..#31, '"', '[', ']', '|', ';'..'>', '+', ','] then
+        {$ENDIF}
           Exit;
       NameIsValid := True;
     end;
@@ -900,16 +673,23 @@ WalkSFT:
     {Assume success}
     ParsePath := True;
 
-    {Get working copy of InputPath; convert to uppercase and trim blanks}
-    S := StUpCase(Trim(InputPath));
+    {Get working copy of InputPath; trim blanks (DOS names are upper case)}
+    S := OpString.Trim(InputPath);
+    {$IFNDEF UNIX}
+    S := StUpCase(S);
+    {$ENDIF}
 
+    {$IFDEF UNIX}
+    if (Pos('//', S) <> 0) then
+    {$ELSE}
     if (Pos(':', S) > 2) or (Pos('/', S) <> 0) or
        (Pos('::', S) <> 0) or (Pos('\\', S) <> 0) then
+    {$ENDIF}
       ParsePath := False
     {if S is just a path name, add "*.*" to search path}
     else if IsPath(S) then begin
-      if S[SLen] = '.' then
-        S := S+'\';
+      if (SLen > 0) and (S[SLen] = '.') then
+        S := S+DirSep;
       LeadInPath := S;
       SearchPath := S+'*.*';
     end
@@ -922,8 +702,8 @@ WalkSFT:
 
           0 : if (Attr and Directory {= $10} ) <> 0 then begin
                 {Input path is valid directory name}
-                SearchPath := S+'\*.*';
-                LeadInPath := S+'\';
+                SearchPath := S+DirSep+'*.*';
+                LeadInPath := S+DirSep;
               end
               else begin
                 {Input path is the name of a file}
@@ -947,7 +727,7 @@ WalkSFT:
                 while not IsPath(S) do
                   Dec(SLen);
 
-                if (S[SLen] <> ':') or (SLen = 2) then
+                if (SLen = 0) or (S[SLen] <> ':') or (SLen = 2) then
                   LeadInPath := S
                 else
                   ParsePath := False;
@@ -957,360 +737,74 @@ WalkSFT:
         end;
   end;
 
-{$IFDEF Dpmi}   {!!.21 begin - rewritten for pmode}
-
   function PrintInstalled : Boolean;
     {-Returns True if PRINT.COM is installed}
-    var
-      DR : DpmiRegisters;
   begin
-    {INT $2F functions available only in DOS 3}
-    if DosVersion >= $300 then
-      with DR do begin
-        FillChar(DR, SizeOf(DR), 0);
-        AX := $0100;
-        if SimulateRealModeInt($2F, DR) <> 0 then
-          PrintInstalled := False
-        else
-          PrintInstalled := ((AX and $00FF) = $FF);
-      end
-    else
-      PrintInstalled := False;
+    {FPC port: stubbed because there is no DOS print spooler}
+    PrintInstalled := False;
   end;
 
   function SubmitPrintFile(FileName : string) : Byte;
     {-This procedure submits a file to the PC DOS 3.0 or greater concurrent
       print utility.}
-  type
-    PSubmitPacket = ^SubmitPacket;
-    SubmitPacket = record
-                     Level : Byte;
-                     FilenamePtr : PChar;
-                   end;
-  var
-    S : string;
-    SLen : Byte absolute S;
-    L1, L2 : LongInt;
-    DR : DpmiRegisters;
   begin
-    S := Trim(FileName);
-    S := FullPathName(S);
-    if SLen = 0 then
-      SubmitPrintFile := 2  {file not found}
-    else begin
-      if SLen > 64 then
-        SLen := 64;
-      S[Succ(SLen)] := #0;
-
-      {allocate DOS memory for pathname}
-      L1 := GlobalDosAlloc(65);
-      if L1 = 0 then begin
-        SubmitPrintFile := 8; {out of memory}
-        exit;
-      end;
-      Move(S[1], Ptr(LongRec(L1).LowWord, 0)^, Succ(SLen));
-
-      {allocate DOS memory for submitpacket}
-      L2 := GlobalDosAlloc(SizeOf(SubmitPacket));
-      if L2 = 0 then begin
-        if GlobalDosFree(LongRec(L1).LowWord) = 0 then ;
-        SubmitPrintFile := 8; {out of memory}
-        exit;
-      end;
-
-      with PSubmitPacket(Ptr(LongRec(L2).LowWord, 0))^ do begin
-        FileNamePtr := Ptr(LongRec(L1).HighWord, 0);
-        Level := 0;
-      end;
-
-      with DR do begin
-        FillChar(DR, SizeOf(DR), 0);
-        DS := LongRec(L2).HighWord;
-        AX := $0101;                                {submit file to be printed}
-        if SimulateRealModeInt($2F, DR) <> 0 then   {print spool control int}
-          SubmitPrintFile := 1                      {invalid function if DPMI error}
-        else if Odd(Flags) then                     {check carry flag}
-          SubmitPrintFile := Byte(AX and $00FF)     {carry set, return code in AL}
-        else
-          SubmitPrintFile := 0;
-      end;
-      if GlobalDosFree(LongRec(L2).LowWord) <> 0 then ;
-      if GlobalDosFree(LongRec(L1).LowWord) <> 0 then ;
-    end;
+    {FPC port: stubbed because there is no DOS print spooler; 1 = invalid function}
+    SubmitPrintFile := 1;
   end;
 
   procedure CancelPrintFile(FileMask : string);
     {-Cancels the files matched by the file mask passed in FileMask.}
-  var
-    Len : Byte absolute FileMask;
-    L : LongInt;
-    DR : DpmiRegisters;
   begin
-    if Len > 64 then
-      Len := 64;                {truncate filenames longer than 64 characters}
-    L := GlobalDosAlloc(65);    {allocate a real-mode block}
-    if L = 0 then
-      Exit;
-    with DR do begin
-      FileMask[Succ(Len)] := #0;            {make FileMask an ASCIIZ string}
-      Move(FileMask[1], Ptr(LongRec(L).LowWord, 0)^, Succ(Len));
-      FillChar(DR, SizeOf(DR), 0);
-      DS := LongRec(L).HighWord;            {DS:DX points to the ASCIIZ string}
-      AX := $0102;
-      if SimulateRealModeInt($2F, DR) <> 0 then ;{print spool control interrupt}
-      if GlobalDosFree(LongRec(L).LowWord) <> 0 then ;
-    end;
-  end;
-
-  procedure CancelAllPrintFiles;
-    {-Cancels all files in the print queue}
-  var
-    DR : DpmiRegisters;
-  begin
-    FillChar(DR, SizeOf(DR), 0);
-    DR.AX := $0103;                             {cancel all files function}
-    if SimulateRealModeInt($2F, DR) <> 0 then ; {print spool control interrupt}
-  end;
-
-  function GetPrintStatus(var QPtr : Pointer) : Byte;
-    {-Halts printing, returns current error status, puts pointer to the filename
-      queue in the QPtr variable. Filenames in the queue are 64-byte ASCIIZ
-      strings. The end of the queue is marked by a name starting with a null.}
-  var
-    DR : DpmiRegisters;
-  begin
-    with DR do begin
-      TempSele := $0000;
-      QPtr := nil;
-      FillChar(DR, SizeOf(DR), 0);
-      AX := $0104;                               {access print queue function}
-      if SimulateRealModeInt($2F, DR) <> 0 then  {print spool control interrupt}
-        GetPrintStatus := 1
-      else if Odd(Flags) then                    {check carry flag}
-        GetPrintStatus := Byte(AX and $00FF)
-      else if GetSelectorForRealMem(Ptr(DS, SI), $FFFF, TempSele) <> 0 then
-        GetPrintStatus := 1                      {couldn't alloc selector}
-      else begin
-        QPtr := Ptr(TempSele, 0);
-        GetPrintStatus := 0;
-      end;
-    end;
-  end;
-
-  procedure EndPrintStatus;
-    {-Releases the spooler from the GetPrintStatus procedure.}
-  var
-    DR : DpmiRegisters;
-  begin
-    if TempSele <> $0000 then
-      if FreeLDTDescriptor(TempSele) <> 0 then
-        Exit;
-    FillChar(DR, SizeOf(DR), 0);
-    DR.AX := $0105;                              {unfreeze queue function}
-    if SimulateRealModeInt($2F, DR) <> 0 then ;  {print spool control interrupt}
-  end;
-
-{$ELSE}
-
-  function PrintInstalled : Boolean;
-    {-Returns True if PRINT.COM is installed}
-  begin
-    {INT $2F functions available only in DOS 3}
-    if DosVersion >= $300 then
-      with Regs do begin
-        AX := $0100;         {get PRINT installed status}
-        Intr($2F, Regs);     {print spool control interrupt}
-        PrintInstalled := (AL = $FF); {DOS returns $FF in AL if PRINT installed}
-      end
-    else
-      PrintInstalled := False;
-  end;
-
-  function SubmitPrintFile(FileName : string) : Byte;
-    {-This procedure submits a file to the PC DOS 3.0 or greater concurrent
-      print utility.}
-  type
-    AsciiZ = array[1..65] of Char;
-    SubmitPacket = record
-                     Level : Byte;
-                     FilenamePtr : ^AsciiZ;
-                   end;
-  var
-    SubPack : SubmitPacket;
-    S : string;
-    SLen : Byte absolute S;
-  begin
-    S := Trim(FileName);
-    S := FullPathName(S);    {!!.12}
-    if SLen <> 0 then
-      with SubPack, Regs do begin
-        Level := 0;          {set level code}
-        if SLen > 64 then
-          SLen := 64;        {truncate filenames longer than 64 characters}
-        S[Succ(SLen)] := #0; {add null to end of string}
-        FilenamePtr := @S[1]; {point to first character in S}
-        DS := Seg(SubPack);  {DS:DX points to the packet}
-        DX := Ofs(SubPack);
-        AX := $0101;         {submit file to be printed}
-        Intr($2F, Regs);     {print spool control interrupt}
-        if Odd(Flags) then   {check carry flag}
-          SubmitPrintFile := AL {carry set, return code in AL}
-        else
-          SubmitPrintFile := 0;
-      end
-    else
-      SubmitPrintFile := 2;  {return the code for a file not found error}
-  end;
-
-  procedure CancelPrintFile(FileMask : string);
-    {-Cancels the files matched by the file mask passed in FileMask.}
-  var
-    Len : Byte absolute FileMask;
-  begin
-    if Len > 64 then
-      Len := 64;             {truncate filenames longer than 64 characters}
-    with Regs do begin
-      FileMask[Succ(Len)] := #0; {make FileMask an ASCIIZ string}
-      DS := Seg(FileMask);   {DS:DX points to the ASCIIZ string}
-      DX := Ofs(FileMask[1]);
-      AX := $0102;           {cancel print file}
-      Intr($2F, Regs);       {print spool control interrupt}
-    end;
+    {FPC port: stubbed because there is no DOS print spooler}
   end;
 
   procedure CancelAllPrintFiles;
     {-Cancels all files in the print queue}
   begin
-    Regs.AX := $0103;        {cancel all files function}
-    Intr($2F, Regs);         {print spool control interrupt}
+    {FPC port: stubbed because there is no DOS print spooler}
   end;
 
   function GetPrintStatus(var QPtr : Pointer) : Byte;
     {-Halts printing, returns current error status, puts pointer to the filename
-      queue in the QPtr variable. Filenames in the queue are 64-byte ASCIIZ
-      strings. The end of the queue is marked by a name starting with a null.}
+      queue in the QPtr variable.}
   begin
-    with Regs do begin
-      AX := $0104;           {access print queue function}
-      Intr($2F, Regs);       {print spool control interrupt}
-      {check carry flag}
-      if Odd(Flags) then begin
-        {carry set, return code in AL}
-        QPtr := nil;
-        GetPrintStatus := AL;
-      end
-      else begin
-        {DS:SI points to the queue}
-        QPtr := Ptr(DS, SI);
-        GetPrintStatus := 0;
-      end;
-    end;
+    {FPC port: stubbed because there is no DOS print spooler}
+    QPtr := nil;
+    GetPrintStatus := 1;
   end;
 
   procedure EndPrintStatus;
     {-Releases the spooler from the GetPrintStatus procedure.}
   begin
-    Regs.AX := $0105;        {unfreeze queue function}
-    Intr($2F, Regs);         {print spool control interrupt}
+    {FPC port: stubbed because there is no DOS print spooler}
   end;
-
-{$ENDIF}     {!!.21 end}
 
   function GetEnvironmentString(SearchString : string) : string;
     {-Return a string from the environment}
   begin
-    while SearchString[Length(SearchString)] = '=' do
+    while (Length(SearchString) > 0) and
+          (SearchString[Length(SearchString)] = '=') do
       Dec(SearchString[0]);
     GetEnvironmentString := Dos.GetEnv(SearchString);
-  end;
-
-  function PtrDiff(H, L : Pointer) : LongInt;
-    {-Return the number of bytes between H^ and L^. H is the higher address}
-  var
-    High : SegOfs absolute H;
-    Low : SegOfs absolute L;
-  begin
-    PtrDiff := (LongInt(High.S) shl 4+High.O)-(LongInt(Low.S) shl 4+Low.O);
   end;
 
   function SetBlock(var Paragraphs : Word) : Boolean;
     {-Change size of DOS memory block allocated to this program}
   begin
-    with Regs do begin
-      AH := $4A;
-      ES := PrefixSeg;
-      BX := Paragraphs;
-      MsDos(Regs);
-      Paragraphs := BX;
-      SetBlock := not Odd(Flags);
-    end;
+    {FPC port: stubbed because there are no DOS memory blocks; reports success}
+    SetBlock := True;
   end;
-
-  function UsingEmulator : Boolean;
-    {-Return True if floating point emulator in use}
-  type
-    Array3 = array[1..3] of Char;
-  const
-    EmuSignature : Array3 = 'emu';
-  var
-    A3P : ^Array3;
-  begin
-    A3P := Ptr(SSeg, $E0);
-    {using emulator if Test8087 is 0 and emulator's signature is found in SS}
-    UsingEmulator := (Test8087 = 0) and (A3P^ = EmuSignature);
-  end;
-
-{$IFDEF Heap6} {!!.10} {New version of ExecDos follows} {!!.20}
 
   function ExecDos(Command : string; UseSecond : Boolean; EDP : ExecDosProc) : Integer;
     {-Execute any DOS command. Call with Command = '' for a new shell. If
       UseSecond is false, Command must be the full pathname of a program to be
       executed}
   var
-    {Variables for saving and restoring state of system}
-    OurInt23 : Pointer;
-    OurInt24 : Pointer;
-    SaveDta : Pointer;  {!!.01}
-
-    {Variables for managing the heap compression}
-    ParasWeHave : Word;
-    ParasForDos : Word;
-    ParasToKeep : Word;
-    OldHeapEnd : Pointer;
-
-    {Variables for parsing the command line}
     BlankPos : Word;
-    PathName : string[127];
-    CommandTail : string[127];
+    PathName : string;
+    CommandTail : string;
   begin
-    {Current DOS memory allocation read from memory control block}
-{$IFNDEF Dpmi}  {no heap compression needed in protected mode}         {!!.20}
-    ParasWeHave := MemW[Pred(PrefixSeg):3];
-
-    {Calculate amount of memory to give up}
-    ParasForDos := Pred(PtrDiff(HeapEnd, HeapPtr) shr 4);
-
-    {Calculate amount of memory to keep while in shell}
-    ParasToKeep := ParasWeHave-ParasForDos;
-
-    {See if enough memory to run DOS}
-    if (ParasForDos > 0) and (ParasForDos < (MinSpaceForDos shr 4)) then begin
-      ExecDos := -4;
-      Exit;
-    end;
-
-    {Deallocate memory for DOS}
-    if not SetBlock(ParasToKeep) then begin
-      ExecDos := -2;
-      Exit;
-    end;
-
-    {Save old end of heap and set new one}
-    OldHeapEnd := HeapEnd;
-    HeapEnd := HeapPtr;
-{$ENDIF}                                                                {!!.20}
-
-    {get parameters for Execute}
+    {FPC port: no heap compression / DOS memory block juggling is needed}
     if Command = '' then
       UseSecond := True;
     CommandTail := '';
@@ -1325,13 +819,18 @@ WalkSFT:
       end;
     end
     else begin
-      {Pathname is the full pathname for COMMAND.COM}
+      {$IFDEF UNIX}
+      PathName := GetEnvironmentString('SHELL');
+      if PathName = '' then
+        PathName := '/bin/sh';
+      {$ELSE}
       PathName := GetEnvironmentString('COMSPEC');
-
+      if PathName = '' then
+        PathName := 'cmd.exe';
       {if Command is empty, we're doing a shell}
       if Command <> '' then
-        {we're asking COMMAND.COM to execute the command}
         CommandTail := '/C '+Command;
+      {$ENDIF}
     end;
 
     {Let user routine store and clear the physical screen}
@@ -1339,196 +838,19 @@ WalkSFT:
 
     {let user routine show status info if entering DOS shell}
     if (Command = '') then
-      {Pass user routine the approximate memory available in KB}
-      EDP(ExecShowMemory, (ParasForDos-240) shr 6);
+      EDP(ExecShowMemory, 640);
 
-    {get current DTA}    {!!.01}
-    GetDta(SaveDta);     {!!.01}
-
-    {switch vectors}
-    SwapVectors;
-
-    {Call Turbo's EXEC function}
-    Exec(PathName, CommandTail);
-{$IFDEF Dpmi}                                                         {!!.20}
-    {accomodate known problem with RTM using 386^Max as DPMI server}  {!!.20}
-    if DosError = $4B00 then                                          {!!.20}
-      DosError := 0;                                                  {!!.20}
-{$ENDIF}                                                              {!!.20}
-
-    {restore vectors}
-    SwapVectors;
-
-    {restore DTA}        {!!.01}
-    SetDta(SaveDta);     {!!.01}
-
-{$IFNDEF Dpmi}                                                         {!!.20}
-    {Reallocate memory from DOS}
-    if not SetBlock(ParasWeHave) then begin
-      ExecDos := -3;
-      Exit;
-    end;
-
-    {Put heap end back where it was}
-    HeapEnd := OldHeapEnd;
-{$ENDIF}                                                               {!!.20}
-
-    {if not in shell, let user routine allow time to see result}
-    if (Command <> '') or (DosError <> 0) then
-      EDP(ExecPauseAfterRun, 0);
-
-    {give user routine a chance to restore the screen}
-    EDP(ExecRestoreScreen, 0);
-
-    {If we get to here, our function result is in DosError}
-    ExecDos := DosError;
-  end;
-
-{$ELSE}
-
-  function EndOfHeap : Pointer;
-    {-Returns a pointer to the end of the free list}
-  var
-    FreeSegOfs : SegOfs absolute FreePtr;
-  begin
-    if FreeSegOfs.O = 0 then
-      {the free list is empty, add $1000 to the segment}
-      EndOfHeap := Ptr(FreeSegOfs.S+$1000, 0)
+    DosError := 0;
+    {$IFDEF UNIX}
+    if UseSecond and (Command <> '') then begin
+      if Unix.Shell(Command) < 0 then
+        DosError := 2;
+    end
     else
-      EndOfHeap := Ptr(FreeSegOfs.S+(FreeSegOfs.O shr 4), 0);
-  end;
-
-  function ExecDos(Command : string; UseSecond : Boolean; EDP : ExecDosProc) : Integer;
-    {-Execute any DOS command. Call with Command = '' for a new shell. If
-      UseSecond is false, Command must be the full pathname of a program to be
-      executed}
-  label
-    ExitPoint;
-  var
-    PathName,
-    CommandTail : string[127];
-    OurInt23,
-    OurInt24,
-    OldEndOfHeap,
-    NewEndOfHeap,
-    TopOfHeap : Pointer;
-    BlankPos,
-    Allocated,
-    SizeOfFreeList,
-    ParasToKeep,
-    ParasWeHave,
-    ParasForDos : Word;
-    SaveDta : Pointer;  {!!.01}
-  begin
-    {Calculate number of bytes to save}
-    TopOfHeap := Ptr(SegOfs(FreePtr).S+$1000, 0);
-    SizeOfFreeList := PtrDiff(TopOfHeap, EndOfHeap);
-
-    {get current DTA}    {!!.01}
-    GetDta(SaveDta);     {!!.01}
-
-    {If enough space available, use stack to store the free list}
-    if (not UsingEmulator) and
-       (LongInt(SizeOfFreeList)+StackSafetyMargin < LongInt(SPtr)) then begin
-      NewEndOfHeap := Ptr(SSeg, 0);
-      Allocated := 0;
-    end
-    else begin
-      {Check for sufficient memory}
-      if MaxAvail < LongInt(SizeOfFreeList) then begin
-        {Insufficient memory to store free list}
-        ExecDos := -1;
-        Exit;
-      end;
-
-      {Allocate memory for a copy of free list}
-      Allocated := SizeOfFreeList;
-      if Allocated > 0 then
-        GetMem(NewEndOfHeap, Allocated);
-
-      {Recalculate the size of the free list}
-      SizeOfFreeList := Word(PtrDiff(TopOfHeap, EndOfHeap));
-    end;
-
-    {Save the current pointer to the end of the free list}
-    OldEndOfHeap := EndOfHeap;
-
-    {Current DOS memory allocation read from memory control block}
-    ParasWeHave := MemW[Pred(PrefixSeg):3];
-
-    {Calculate amount of memory to give up}
-    ParasForDos := Pred(PtrDiff(TopOfHeap, HeapPtr) shr 4);
-
-    {Calculate amount of memory to keep while in shell}
-    ParasToKeep := ParasWeHave-ParasForDos;
-
-    {See if enough memory to run DOS}
-    if (ParasForDos > 0) and (ParasForDos < (MinSpaceForDos shr 4)) then begin
-      ExecDos := -4;
-      goto ExitPoint;
-    end;
-
-    {Deallocate memory for DOS}
-    if not SetBlock(ParasToKeep) then begin
-      ExecDos := -2;
-      goto ExitPoint;
-    end;
-
-    {get parameters for Execute}
-    if Command = '' then
-      UseSecond := True;
-     CommandTail := '';
-    if not UseSecond {command processor} then begin
-      {Command is assumed to be a full pathname for a program}
-      BlankPos := Pos(' ', Command);
-      if BlankPos = 0 then
-        PathName := Command
-      else begin
-        CommandTail := Copy(Command, BlankPos, Length(Command));
-        PathName := Copy(Command, 1, Pred(BlankPos));
-      end;
-    end
-    else begin
-      {Pathname is the full pathname for COMMAND.COM}
-      PathName := GetEnvironmentString('COMSPEC');
-
-      {if Command is empty, we're doing a shell}
-      if Command <> '' then
-        {we're asking COMMAND.COM to execute the command}
-        CommandTail := '/C '+Command;
-    end;
-
-    {Let user routine store and clear the physical screen}
-    EDP(ExecSaveScreen, 0);
-
-    {let user routine show status info if entering DOS shell}
-    if (Command = '') then
-      {Pass user routine the approximate memory available in KB}
-      EDP(ExecShowMemory, (ParasForDos-240) shr 6);
-
-    {Copy the free list to a safe location}
-    Move(OldEndOfHeap^, NewEndOfHeap^, SizeOfFreeList);
-
-    {switch vectors}
-    SwapVectors;
-
-    {Call Turbo's EXEC function}
-    Exec(PathName, CommandTail);
-
-    {restore vectors}
-    SwapVectors;
-
-    {restore DTA}        {!!.01}
-    SetDta(SaveDta);     {!!.01}
-
-    {Reallocate memory from DOS}
-    if not SetBlock(ParasWeHave) then begin
-      ExecDos := -3;
-      goto ExitPoint;
-    end;
-
-    {Put free list back where it was}
-    Move(NewEndOfHeap^, OldEndOfHeap^, SizeOfFreeList);
+      Dos.Exec(PathName, CommandTail);
+    {$ELSE}
+    Dos.Exec(PathName, CommandTail);
+    {$ENDIF}
 
     {if not in shell, let user routine allow time to see result}
     if (Command <> '') or (DosError <> 0) then
@@ -1539,43 +861,21 @@ WalkSFT:
 
     {If we get to here, our function result is in DosError}
     ExecDos := DosError;
-
-ExitPoint:
-    {Deallocate any dynamic memory used}
-    if Allocated <> 0 then
-      FreeMem(NewEndOfHeap, Allocated);
   end;
 
-{$ENDIF}
-
-  function DosBlockWrite(H : Word; var Src; N : Word) : Word;
-    {-Calls DOS's BlockWrite routine. Returns 0 if successful, else the DOS
-      error code.}
+  function FPos(H : THandle; Offset, Origin : Int64) : Int64;
+    {-Seek wrapper, returns -1 on error}
   begin
-    with Regs do begin
-      AH := $40;             {write to file}
-      BX := H;               {file handle}
-      CX := N;               {Number of bytes to write}
-      DS := Seg(Src);        {DS:DX points to buffer}
-      DX := Ofs(Src);
-      MsDos(Regs);           {returns bytes written in AX}
-
-      {check carry flag, also the number of bytes written}
-      if Odd(Flags) or (AX <> N) then
-        DosBlockWrite := AX
-      else
-        DosBlockWrite := 0;
-    end;
+    FPos := SysUtils.FileSeek(H, Offset, Origin);
   end;
 
   function TextSeek(var F : Text; Target : LongInt) : Boolean;
     {-Do a Seek for a text file opened for input. Returns False in case of I/O
       error.}
   var
-    T : LongRec absolute Target;
-    Pos : LongInt;
+    Pos : Int64;
   begin
-    with Regs, TextRec(F) do begin
+    with TextRec(F) do begin
       {assume failure}
       TextSeek := False;
 
@@ -1584,20 +884,12 @@ ExitPoint:
         Exit;
 
       {get current position of the file pointer}
-      AX := $4201;           {move file pointer function}
-      BX := Handle;          {file handle}
-      CX := 0;               {if CX and DX are both 0, call returns the..}
-      DX := 0;               {current file pointer in DX:AX}
-      MsDos(Regs);
-
-      {check for I/O error}
-      if Odd(Flags) then
+      Pos := FPos(Handle, 0, 1);
+      if Pos < 0 then
         Exit;
 
       {calculate current position for the start of the buffer}
-      LongRec(Pos).HighWord := DX;
-      LongRec(Pos).LowWord := AX;
-      Dec(Pos, BufEnd);
+      Pos := Pos-BufEnd;
 
       {see if the Target is within the buffer}
       Pos := Target-Pos;
@@ -1605,18 +897,11 @@ ExitPoint:
         {it is--just move the buffer pointer}
         BufPos := Pos
       else begin
-        {have DOS seek to the Target-ed offset}
-        AX := $4200;         {move file pointer function}
-        BX := Handle;        {file handle}
-        CX := T.HighWord;    {CX has high word of Target offset}
-        DX := T.LowWord;     {DX has low word}
-        MsDos(Regs);
-
-        {check for I/O error}
-        if Odd(Flags) then
+        {seek to the Target-ed offset}
+        if FPos(Handle, Target, 0) < 0 then
           Exit;
 
-        {tell Turbo its buffer is empty}
+        {tell the RTL its buffer is empty}
         BufEnd := 0;
         BufPos := 0;
       end;
@@ -1629,58 +914,22 @@ ExitPoint:
   function TextFileSize(var F : Text) : LongInt;
     {-Return the size of text file F. Returns -1 in case of I/O error.}
   var
-    OldHi, OldLow : Integer;
+    Old, Size : Int64;
   begin
-    with Regs, TextRec(F) do begin
+    with TextRec(F) do begin
+      TextFileSize := -1;
       {check for open file}
-      if Mode = fmClosed then begin
-        TextFileSize := -1;
+      if Mode = fmClosed then
         Exit;
-      end;
-
-      {get current position of the file pointer}
-      AX := $4201;           {move file pointer function}
-      BX := Handle;          {file handle}
-      CX := 0;               {if CX and DX are both 0, call returns the..}
-      DX := 0;               {current file pointer in DX:AX}
-      MsDos(Regs);
-
-      {check for I/O error}
-      if Odd(Flags) then begin
-        TextFileSize := -1;
+      Old := FPos(Handle, 0, 1);
+      if Old < 0 then
         Exit;
-      end;
-
-      {save current position of the file pointer}
-      OldHi := DX;
-      OldLow := AX;
-
-      {have DOS move to end-of-file}
-      AX := $4202;           {move file pointer function}
-      BX := Handle;          {file handle}
-      CX := 0;               {if CX and DX are both 0, call returns the...}
-      DX := 0;               {current file pointer in DX:AX}
-      MsDos(Regs);           {call DOS}
-
-      {check for I/O error}
-      if Odd(Flags) then begin
-        TextFileSize := -1;
+      Size := FPos(Handle, 0, 2);
+      if Size < 0 then
         Exit;
-      end;
-
-      {calculate the size}
-      TextFileSize := LongInt(DX) shl 16+AX;
-
-      {reset the old position of the file pointer}
-      AX := $4200;           {move file pointer function}
-      BX := Handle;          {file handle}
-      CX := OldHi;           {high word of old position}
-      DX := OldLow;          {low word of old position}
-      MsDos(Regs);           {call DOS}
-
-      {check for I/O error}
-      if Odd(Flags) then
-        TextFileSize := -1;
+      if FPos(Handle, Old, 0) < 0 then
+        Exit;
+      TextFileSize := Size;
     end;
   end;
 
@@ -1689,31 +938,20 @@ ExitPoint:
       the position of the physical file pointer, adjusted to account for
       buffering). Returns -1 in case of I/O error.}
   var
-    Position : LongInt;
+    Position : Int64;
   begin
-    with Regs, TextRec(F) do begin
+    with TextRec(F) do begin
+      TextPos := -1;
       {check for open file}
-      if Mode = fmClosed then begin
-        TextPos := -1;
+      if Mode = fmClosed then
         Exit;
-      end;
 
       {get current position of the physical file pointer}
-      AX := $4201;           {move file pointer function}
-      BX := Handle;          {file handle}
-      CX := 0;               {if CX and DX are both 0, call returns the...}
-      DX := 0;               {current file pointer in DX:AX}
-      MsDos(Regs);           {call DOS}
-
-      {check for I/O error}
-      if Odd(Flags) then begin
-        TextPos := -1;
+      Position := FPos(Handle, 0, 1);
+      if Position < 0 then
         Exit;
-      end;
 
       {calculate the position of the logical file pointer}
-      LongRec(Position).HighWord := DX;
-      LongRec(Position).LowWord := AX;
       if Mode = fmOutput then
         {writing}
         Inc(Position, BufPos)
@@ -1722,7 +960,6 @@ ExitPoint:
         if BufEnd <> 0 then
           Dec(Position, BufEnd-BufPos);
 
-      {return the calculated position}
       TextPos := Position;
     end;
   end;
@@ -1730,11 +967,9 @@ ExitPoint:
   function TextFlush(var F : Text) : Boolean;
     {-Flush the buffer(s) for a text file. Returns False in case of I/O error.}
   var
-    Position : LongInt;
-    P : LongRec absolute Position;
-    Code : Word;
+    Position : Int64;
   begin
-    with Regs, TextRec(F) do begin
+    with TextRec(F) do begin
       {assume failure}
       TextFlush := False;
 
@@ -1752,30 +987,23 @@ ExitPoint:
           Exit;
 
         {set the new position of the physical file pointer}
-        AX := $4200;         {move file pointer function}
-        BX := Handle;        {file handle}
-        CX := P.HighWord;    {CX has high word of offset}
-        DX := P.LowWord;     {DX has low word}
-        MsDos(Regs);         {call DOS}
-
-        {check for I/O error}
-        if Odd(Flags) then
+        if FPos(Handle, Position, 0) < 0 then
           Exit;
       end
       else begin
         {write the current contents of the buffer, if any}
         if BufPos <> 0 then begin
-          Code := DosBlockWrite(Handle, BufPtr^, BufPos);
-          if Code <> 0 then
+          if SysUtils.FileWrite(Handle, BufPtr^, BufPos) <> BufPos then
             Exit;
         end;
 
-        {flush DOS's buffers}
+        {flush OS buffers}
         if not FlushDosBuffers(F) then
-          Exit;
+          {not all handles (e.g. devices) can be flushed; ignore}
+          ;
       end;
 
-      {tell Turbo its buffer is empty}
+      {tell the RTL its buffer is empty}
       BufEnd := 0;
       BufPos := 0;
     end;
@@ -1791,8 +1019,7 @@ ExitPoint:
     case StdHandle of
       StdInHandle,
       StdOutHandle,
-      StdErrHandle,
-      StdPrnHandle :
+      StdErrHandle :
         begin
           {Initialize the file variable}
           Assign(F, '');
@@ -1801,185 +1028,117 @@ ExitPoint:
           else                            {!!.11}
             Rewrite(F);                   {!!.11}
           if IoResult = 0 then begin
-            TextRec(F).Handle := StdHandle;
-            if StdHandle = StdErrHandle then
-              TextRec(F).BufSize := 1;
+            case StdHandle of
+              StdInHandle  : TextRec(F).Handle := StdInputHandle;
+              StdOutHandle : TextRec(F).Handle := StdOutputHandle;
+              StdErrHandle : begin
+                               TextRec(F).Handle := StdErrorHandle;
+                               TextRec(F).BufSize := 1;
+                             end;
+            end;
             OpenStdDev := True;
           end;
+        end;
+      StdPrnHandle :
+        begin
+          {FPC port: the DOS standard printer is the OS printer device}
+          Assign(F, PrnDevName);
+          Rewrite(F);
+          OpenStdDev := (IoResult = 0);
         end;
     end;
   end;
 
   function HandleIsConsole(Handle : Word) : Boolean;
     {-Return true if handle is the console device (input or output)}
+  {$IFDEF WINDOWS}
+  var
+    H : PtrUInt;
   begin
-    with Regs do begin
-      AX := $4400;
-      BX := Handle;
-      MsDos(Regs);
-      if (DX and $80) = 0 then
-        HandleIsConsole := False
-      else
-        HandleIsConsole := (DX and $02 <> 0) or (DX and $01 <> 0);
+    case Handle of
+      0 : H := StdInputHandle;
+      1 : H := StdOutputHandle;
+      2 : H := StdErrorHandle;
+      else H := Handle;
     end;
+    HandleIsConsole := GetFileType(H) = 2; {FILE_TYPE_CHAR}
   end;
+  {$ELSE}
+  begin
+    {FPC port: assume the standard handles are the console}
+    HandleIsConsole := Handle <= 2;
+  end;
+  {$ENDIF}
 
   procedure SetRawMode(var F : Text; On : Boolean);
     {-Set "raw" mode on or off for the specified text file (must be a device)}
   begin
-    with TextRec(F), Regs do begin
+    with TextRec(F) do begin
       {check for open file}
       if (Mode < fmInput) or (Mode > fmInOut) then begin
-        {Turbo's file not found error code}
+        {file not found error code}
         DosError := 103;
         Exit;
       end;
-
+      {FPC port: stubbed because there is no DOS device raw/cooked mode}
       DosError := 0;
-
-      FillChar(Regs, SizeOf(Regs), 0);                              {!!.21}
-      AX := $4400;           {Get device information}
-      BX := Handle;
-      MsDos(Regs);           {returns device info in DX}
-
-      if not Odd(Flags) then begin
-        {check bit 7 for device flag}
-        if DL and $80 = 0 then
-          Exit;
-
-        {clear unwanted bits}
-        DX := DX and $00AF;
-
-        {select raw/cooked mode}
-        if On then
-          {set bit 5 of DX}
-          DL := DL or $20
-        else
-          {clear bit 5 of DX}
-          DL := DL and $DF;
-
-        AX := $4401;           {Set device information}
-        BX := Handle;          {BX has file handle}
-        MsDos(Regs);
-      end;
-
-      if Odd(Flags) then
-        DosError := AX
-      else
-        DosError := 0;
     end;
   end;
 
   function FileHandlesOpen(CountDevices : Boolean) : Byte; {!!.01}
     {-Return the number of open files owned by a program}
-  type
-    HandleTable = array[0..254] of Byte;
-  var
-    HandlesPtr : ^HandleTable;
-    I, N, Max : Byte;
-{$IFDEF Dpmi}                                                        {!!.21}
-    Sele : Word;                                                     {!!.21}
-    P : Pointer;                                                     {!!.21}
-{$ENDIF}                                                             {!!.21}
   begin
-{$IFDEF Dpmi}                                                        {!!.21}
-    LongInt(P) := MemL[PrefixSeg:$34];                               {!!.21}
-    if not GetSelectorForRealMem(P, $100, Sele) = 0 then             {!!.21}
-      Exit;                                                          {!!.21}
-    HandlesPtr := Ptr(Sele, 0);                                      {!!.21}
-{$ELSE}                                                              {!!.21}
-    {pointer to file handles table at PrefixSeg:$34}
-    HandlesPtr := Pointer(MemL[PrefixSeg:$34]);
-{$ENDIF}                                                             {!!.21}
-
-    {size of file handles table at PrefixSeg:$32}
-    Max := Mem[PrefixSeg:$0032]-1;
-
-    N := 0;
-    for I := 0 to Max do
-      if HandlesPtr^[I] <> $FF then
-        case I of
-          0..4 : Inc(N, Ord(CountDevices));
-          else   Inc(N);
-        end;
-
-    FileHandlesOpen := N;
-{$IFDEF Dpmi}                                                        {!!.21}
-    if FreeLDTDescriptor(Sele) = 0 then ;                            {!!.21}
-{$ENDIF}                                                             {!!.21}
+    {FPC port: stubbed because the DOS job file table is not accessible;
+     report only the three standard handles}
+    if CountDevices then
+      FileHandlesOpen := 3
+    else
+      FileHandlesOpen := 0;
   end;
 
   function FileHandlesLeft : Byte;    {!!.01}  {revised}  {!!.11}
     {-Return the number of available file handles}
   const
-    NullName : array[1..4] of Char = 'NUL'#0;
     MaxHandles = 255;
   var
-    Handles : array[1..MaxHandles] of Word;
-    N : Byte;
+    Handles : array[1..MaxHandles] of THandle;
+    N, I : Integer;
+    H : THandle;
   begin
-    inline(
-      $30/$ED/               {xor ch,ch            ;CX = MaxHandles}
-      $B1/<MaxHandles/       {mov cl,<MaxHandles}
-      $BA/>NullName/         {mov dx,>NullName     ;DS:DX => NullName}
-      $8D/$B6/>Handles/      {lea si,[bp+>Handles] ;SI has offset for Handles[1]}
-                             {Next:}
-      $B8/$02/$3D/           {mov ax,$3D02         ;DOS open file function}
-      $CD/$21/               {int $21              ;call DOS}
-      $72/$07/               {jc Close             ;start closing if CF set}
-      $36/                   {ss:}
-      $89/$04/               {mov [si],ax          ;save the Handle}
-      $46/                   {inc si               ;inc pointer into Handles}
-      $46/                   {inc si}
-      $E2/$F2/               {loop Next            ;repeat if CX > 0}
-                             {Close:}
-      $F6/$D1/               {not cl               ;flip bits in cl}
-      $88/$8E/>N/            {mov [bp+>N],cl       ;save handle count in N}
-      $E3/$0C/               {jcxz Done            ;done if count is 0}
-                             {CloseOne:}
-      $4E/                   {dec si               ;dec pointer into Handles}
-      $4E/                   {dec si}
-      $36/                   {ss:}
-      $8B/$1C/               {mov bx,[si]          ;get the handle into BX}
-      $B8/$00/$3E/           {mov ax,$3E00         ;DOS close file function}
-      $CD/$21/               {int $21              ;call DOS, ignore error}
-      $E2/$F4);              {loop CloseOne        ;do it again}
-                             {Done:}
-
+    N := 0;
+    while N < MaxHandles do begin
+      H := SysUtils.FileOpen(NullDevName, fmOpenRead);
+      if LongInt(H) < 0 then
+        Break;
+      Inc(N);
+      Handles[N] := H;
+    end;
+    for I := 1 to N do
+      SysUtils.FileClose(Handles[I]);
     FileHandlesLeft := N;
   end;
 
   function ExistFile(FName : string) : Boolean;
     {-Return true if file is found}
   var
-    FLen : Byte absolute FName;
+    F : file;
+    Attr : Word;
   begin
     {check for empty string}
     if Length(FName) = 0 then
       ExistFile := False
-    else with Regs do begin
-      if (Length(FName) > 3) and (FName[2] = ':') then  {!!.30}
-        if IsPhantom(UpCase(FName[1])) then begin       {!!.30}
-          ExistFile := False;                           {!!.30}
-          Exit;                                         {!!.30}
-        end;                                            {!!.30}
-
-      Inc(FLen);
-      FName[FLen] := #0;
-      AX := $4300;           {get file attribute}
-      DS := Seg(FName);
-      DX := Ofs(FName[1]);
-      MsDos(Regs);
-      ExistFile := (not Odd(Flags)) {and (IoResult = 0)} and {!!.10}
-                   (CX and (VolumeID+Directory) = 0);
+    else begin
+      Assign(F, FName);
+      GetFAttr(F, Attr);
+      ExistFile := (DosError = 0) and (Attr and (VolumeID+Directory) = 0);
     end;
   end;
 
   function ExistOnPath(FName : string; var FullName : string) : Boolean;
    {-Return true if FName is found in
       a) current directory
-      b) program's directory (DOS 3.X only)
-      c) any DOS path directory
+      b) program's directory
+      c) any directory on the PATH
     and return path name to file}
   var
     Ppos, Fpos : Word;
@@ -2000,29 +1159,24 @@ ExitPoint:
       Exit;
     end;
 
-    {If DOS 3 or higher, check the directory where the program was found}
-    if DosVersion >= $300 then begin
-      FullName := JustPathname(ParamStr(0));
-      FullName := AddBackSlash(FullName)+FName;
-      if ExistFile(FullName) then
-        Exit;
-    end;
+    {Check the directory where the program was found}
+    FullName := AddSep(SysUtils.ExtractFilePath(ParamStr(0)))+FName;
+    if ExistFile(FullName) then
+      Exit;
 
     {Check the path}
     DosPath := Dos.GetEnv('PATH');
     Ppos := 1;
-    while Ppos < Length(DosPath) do begin
+    while Ppos <= Length(DosPath) do begin
 
       {Find the termination of the current path entry}
       Fpos := Ppos;
-      while (Fpos <= Length(DosPath)) and (DosPath[Fpos] <> ';') do
+      while (Fpos <= Length(DosPath)) and (DosPath[Fpos] <> PathListSep) do
         Inc(Fpos);
 
       if Fpos > Ppos then begin
         {A path entry found}
-        FullName[0] := Char(Fpos-Ppos);
-        Move(DosPath[Ppos], FullName[1], Fpos-Ppos);
-        FullName := AddBackSlash(FullName)+FName;
+        FullName := AddSep(Copy(DosPath, Ppos, Fpos-Ppos))+FName;
         if ExistFile(FullName) then
           Exit;
       end;
@@ -2038,55 +1192,21 @@ ExitPoint:
 
   function TimeMs : LongInt;
     {-Return time of day in milliseconds since midnight}
+  var
+    H, M, S, S100 : Word;
   begin
-    with Regs do begin
-      AH := $2C;
-      MsDos(Regs);
-      TimeMs := 1000*(LongInt(DH)+60*(LongInt(CL)+60*LongInt(CH)))+10*LongInt(DL);
-    end;
+    GetTime(H, M, S, S100);
+    TimeMs := 1000*(LongInt(S)+60*(LongInt(M)+60*LongInt(H)))+10*LongInt(S100);
   end;
 
-  {!!.10} {Rewritten}
   function IsDirectory(FName : String) : Boolean;
     {-Return true if FName is a directory}
-  var
-    IO : Word;
-    CurDir : PathStr;
-    CurDestDir : PathStr;
-    DiffDrive : Boolean;
   begin
-    GetDir(0, CurDir);
-
-    if (Length(FName) >= 2) and (FName[2] = ':') and (FName[1] <> CurDir[1])
-    then begin
-      {Checking on a different drive}
-      if IsPhantom(UpCase(FName[1])) then begin    {!!.30}
-        IsDirectory := False;                      {!!.30}
-        Exit;                                      {!!.30}
-      end;                                         {!!.30}
-
-      DiffDrive := True;
-      ChDir(FName[1]+':');
-      if IoResult <> 0 then begin
-        {Restore current drive and directory just in case} {!!.22}
-        ChDir(CurDir);                                     {!!.22}
-        IsDirectory := False;
-        Exit;
-      end;
-      GetDir(0, CurDestDir);
-    end else
-      DiffDrive := False;
-
-    ChDir(FName);
-    IsDirectory := (IoResult = 0);
-
-    if DiffDrive then begin
-      ChDir(CurDestDir);
-      IO := IoResult;
-    end;
-
-    ChDir(CurDir);
-    IO := IoResult;
+    {an empty name means the current directory (as ChDir('') did)}
+    if FName = '' then
+      IsDirectory := True
+    else
+      IsDirectory := SysUtils.DirectoryExists(FName);
   end;
 
   function SameFile(FilePath1, FilePath2 : String;
@@ -2100,7 +1220,8 @@ ExitPoint:
     }
   var
     F1, F2 : File;
-    Attr1, Attr2, NewAttr : Word;
+    Attr1, Attr2 : Word;
+    N1, N2 : string;
   begin
     SameFile := False;
     ErrorCode := 0;
@@ -2118,26 +1239,15 @@ ExitPoint:
         ErrorCode := 2;
       Exit;
     end;
-    if Attr1 <> Attr2 then
-      Exit;
-    if ((Attr1 and Archive) = 0) then
-      NewAttr := Attr1 or Archive
-    else
-      NewAttr := Attr1 and (not Archive);
-    SetFAttr(F1,NewAttr);
-    if DosError <> 0 then begin
-      ErrorCode := 3;
-      Exit;
-    end;
-    GetFAttr(F2,Attr2);
-    if DosError <> 0 then
-      ErrorCode := 3;
-
-    SameFile := Attr2 = NewAttr;
-
-    SetFAttr(F1,Attr1);
-    if DosError <> 0 then
-      ErrorCode := 3;
+    {FPC port: compare the fully expanded names instead of the DOS trick of
+     toggling the archive attribute (hard links are not detected)}
+    N1 := SysUtils.ExpandFileName(FilePath1);
+    N2 := SysUtils.ExpandFileName(FilePath2);
+    {$IFNDEF UNIX}
+    N1 := StUpCase(N1);
+    N2 := StUpCase(N2);
+    {$ENDIF}
+    SameFile := (N1 = N2);
   end;
 
   function CopyFile(SrcPath, DestPath : String;
@@ -2149,7 +1259,7 @@ ExitPoint:
       checked for validity. Buffer must already be allocated, and must be no
       less than BufferSize.}
   var
-    ErrorCode,BytesRead,BytesWritten : Word;
+    BytesRead,BytesWritten : Word;
     Time : LongInt;
     Src,Dest : File;
     SaveFileMode : Word;                                 {!!.03}
@@ -2198,8 +1308,8 @@ ExitPoint:
       end;
       BlockWrite(Dest,Buffer^,BytesRead,BytesWritten);
       if (IoResult <> 0) or (BytesWritten <> BytesRead) then begin
-        CopyFile := 4;                 {error reading SrcPath}
-        UnDo(True);                        {error writing DestPath}
+        CopyFile := 4;                 {error writing DestPath}
+        UnDo(True);
         Exit;
       end;
     end;
@@ -2234,427 +1344,147 @@ ExitPoint:
   begin
   end;
 
-  {!!.21 many changes made in the following for disk label stuff in pmode}
-  type
-    XFCBrec =
-      record
-        Flag : Byte;   {should be $FF}
-        Reserved0 : Array[1..5] of Byte; {should be all zeroes}
-        AttrByte : Byte; {should be 8}
-        DriveCode : Byte;
-        FileSpec : Array[1..11] of Char;
-        Reserved1 : Array[1..25] of Byte;
-      end;
-    XFCBPtr = ^XFCBRec;
-    DTABuf = Array[0..63] of Char;
-    DosMemRec =
-      record
-        Sele, Segm : Word;
-      end;
+{$IFDEF WINDOWS}
+  procedure MakeRoot(Drive : Char; var Root : array of Char);
+  begin
+    Root[0] := UpCase(Drive);
+    Root[1] := ':';
+    Root[2] := '\';
+    Root[3] := #0;
+  end;
+{$ENDIF}
 
   function GetMediaID(Drive : Char;
                       var MediaIDRec : MediaIDType) : Word; {!!.14}
-  {$IFDEF DPMI}
+  {$IFDEF WINDOWS}
   var
-    Status : Word;
-    M : DosMemRec;
-    Regs : DpmiRegisters;
+    Root : array[0..3] of Char;
+    VolName : array[0..63] of Char;
+    FsName : array[0..31] of Char;
+    Serial : LongWord;
+    I, L : Integer;
   begin
-    LongInt(M) := GlobalDosAlloc(SizeOf(MediaIDType));
-    if LongInt(M) = 0 then begin
-      GetMediaID := 8;
+    MakeRoot(Drive, Root);
+    Serial := 0;
+    if not GetVolumeInformationA(Root, VolName, SizeOf(VolName), @Serial,
+                                 nil, nil, FsName, SizeOf(FsName)) then begin
+      GetMediaID := GetLastError;
       Exit;
     end;
-    with Regs do begin
-      FillChar(Regs, SizeOf(DpmiRegisters), 0);
-      DS := M.Segm; {DX already set to zero}
-      AX := $440D;
-      BX := Byte(Upcase(Drive))-Byte('A')+1;
-      CX := $0866;
-      Status := SimulateRealModeInt($21, Regs);
-      if Status = 0 then
-        if Odd(Flags) then
-          Status := AX
-        else begin
-          Status := 0;
-          move(Mem[M.Sele:0], MediaIDRec, SizeOf(MediaIDType));
-        end;
-      GetMediaID := Status;
-      Status := GlobalDosFree(M.Sele);
-    end;
+    FillChar(MediaIDRec, SizeOf(MediaIDRec), ' ');
+    MediaIDRec.InfoLevel := 0;
+    MediaIDRec.SerialNumber := Serial;
+    L := StrLen(VolName);
+    for I := 0 to 10 do
+      if I < L then
+        MediaIDRec.VolumeLabel[I] := VolName[I];
+    L := StrLen(FsName);
+    for I := 0 to 7 do
+      if I < L then
+        MediaIDRec.FileSystemID[I] := FsName[I];
+    GetMediaID := 0;
   end;
   {$ELSE}
   begin
-    with Regs do begin
-      DS := Seg(MediaIDRec);
-      DX := Ofs(MediaIDRec);
-      AX := $440D;
-      BX := Byte(Upcase(Drive))-Byte('A')+1;
-      CX := $0866;
-      MsDos(Regs);
-      if Odd(Flags) then
-        GetMediaID := AX
-      else
-        GetMediaID := 0;
-    end;
+    {FPC port: stubbed, no media ID on Unix; 1 = invalid function}
+    GetMediaID := 1;
   end;
   {$ENDIF}
 
   function SetMediaID(Drive : Char;
                       var MediaIDRec : MediaIDType) : Word; {!!.14}
-  {$IFDEF DPMI}
+  {$IFDEF WINDOWS}
   var
-    Status : Word;
-    M : DosMemRec;
-    Regs : DpmiRegisters;
+    S : VolumeNameStr;
   begin
-    LongInt(M) := GlobalDosAlloc(SizeOf(MediaIDType));
-    if LongInt(M) = 0 then begin
-      SetMediaID := 8;
-      Exit;
-    end;
-    move(MediaIDRec, Mem[M.Sele:0], SizeOf(MediaIDType));
-    with Regs do begin
-      FillChar(Regs, SizeOf(DpmiRegisters), 0);
-      DS := M.Segm; {DX already set to zero}
-      AX := $440D;
-      BX := Byte(Upcase(Drive))-Byte('A')+1;
-      CX := $0846;
-      Status := SimulateRealModeInt($21, Regs);
-      if Status = 0 then
-        if Odd(Flags) then
-          Status := AX
-        else
-          Status := 0;
-      SetMediaID := Status;
-      Status := GlobalDosFree(M.Sele);
-    end;
+    {FPC port: the serial number cannot be changed, only the label is set}
+    SetMediaID := 0;
+    S[0] := #11;
+    Move(MediaIDRec.VolumeLabel, S[1], 11);
+    SetMediaID := SetVolumeLabel(Drive, S);
   end;
   {$ELSE}
   begin
-    with Regs do begin
-      DS := Seg(MediaIDRec);
-      DX := Ofs(MediaIDRec);
-      AX := $440D;
-      BX := Byte(Upcase(Drive))-Byte('A')+1;
-      CX := $0846;
-      MsDos(Regs);
-      if Odd(Flags) then
-        SetMediaID := AX
-      else
-        SetMediaID := 0;
-    end;
+    {FPC port: stubbed, no media ID on Unix; 1 = invalid function}
+    SetMediaID := 1;
   end;
   {$ENDIF}
-
-  procedure InitVolXFCB(XFCBP : XFCBPtr; Drive : Char);
-    {-Initialize XFCB to find a volume label}
-  begin
-    FillChar(XFCBP^, SizeOf(XFCBRec), 0);
-    with XFCBP^ do begin
-      FillChar(FileSpec, 11, '?');
-      Flag := $FF;
-      AttrByte := VolumeID;
-      DriveCode := Byte(Upcase(Drive))-Byte('A')+1;
-    end;
-  end;
 
   function GetVolumeLabel(Drive : Char; var VolName : VolumeNameStr) : Word; {!!.14}
     {-Gets the volume label for Drive. Returns 0 for success, or Dos error
       code.}
+  {$IFDEF WINDOWS}
   var
-    SearchR : SearchRec;
-    P : Byte;
+    Root : array[0..3] of Char;
+    Buf : array[0..63] of Char;
   begin
-    FindFirst(Drive+':\*.*', VolumeID, SearchR);
-    if DosError = 0 then begin
-      P := Pos('.', SearchR.Name);
-      if (P = 0) or (P = 9) then begin
-        if P = 9 then
-          Delete(SearchR.Name, P, 1);
-        VolName := SearchR.Name;
-      end else
-        VolName := Pad(Copy(SearchR.Name, 1, P-1), 8) +
-                       Copy(SearchR.Name, P+1, 11);
-    end else begin
-      VolName := '';
-      if DosError = 18 then
-        DosError := 0;
-    end;
-    GetVolumeLabel := DosError;
+    VolName := '';
+    MakeRoot(Drive, Root);
+    if GetVolumeInformationA(Root, Buf, SizeOf(Buf), nil, nil, nil,
+                             nil, 0) then begin
+      VolName := StrPas(Buf);
+      GetVolumeLabel := 0;
+    end
+    else
+      GetVolumeLabel := GetLastError;
   end;
+  {$ELSE}
+  begin
+    {FPC port: no volume labels on Unix, report an empty label}
+    VolName := '';
+    GetVolumeLabel := 0;
+  end;
+  {$ENDIF}
 
   function DeleteVolumeLabel(Drive : Char) : Word; {!!.20}
     {-Deletes an existing volume label on Drive. Returns 0 for success,
       or DOS error code.}
-  {$IFDEF DPMI}
+  {$IFDEF WINDOWS}
   var
-    Status : Word;
-    MFCB : DosMemRec;
-    MDTA : DosMemRec;
-    XFCBP : XFCBPtr;
-    SaveDTAP : Pointer;
-    Regs : DpmiRegisters;
-    MediaID : MediaIDType;
+    Root : array[0..3] of Char;
   begin
-    {Allocate DOS memory blocks}
-    DeleteVolumeLabel := 8;
-    LongInt(MDTA) := GlobalDosAlloc(SizeOf(DTABuf));
-    if LongInt(MDTA) = 0 then
-      Exit;
-    LongInt(MFCB) := GlobalDosAlloc(SizeOf(XFCBRec));
-    if LongInt(MFCB) = 0 then begin
-      Status := GlobalDosFree(MDTA.Sele);
-      Exit;
-    end;
-
-    {Save DTA and switch to ours}
-    GetDTA(SaveDTAP);
-    SetDta(Ptr(MDTA.Segm, 0));
-
-    {Delete label via FCB}
-    with Regs do begin
-      XFCBP := Ptr(MFCB.Sele, 0);
-      InitVolXFCB(XFCBP, Drive);
-      FillChar(Regs, SizeOf(DpmiRegisters), 0);
-      DS := MFCB.Segm; {DX already zero}
-      AX := $1300;
-      Status := SimulateRealModeInt($21, Regs);
-      if Status = 0 then
-        Status := Lo(AX);
-    end;
-
-    if Status = 0 then
-      {Change DOS 4 media ID to all blanks}
-      if GetMediaID(Drive, MediaID) = 0 then begin
-        FillChar(MediaID.VolumeLabel, 11, ' ');
-        if SetMediaID(Drive, MediaID) = 0 then ;
-      end;
-
-    {Restore previous DTA}
-    SetDTA(SaveDTAP);
-
-    {Return status code}
-    DeleteVolumeLabel := Status;
-
-    {Free DOS memory}
-    Status := GlobalDosFree(MFCB.Sele);
-    Status := GlobalDosFree(MDTA.Sele);
+    MakeRoot(Drive, Root);
+    if SetVolumeLabelA(Root, nil) then
+      DeleteVolumeLabel := 0
+    else
+      DeleteVolumeLabel := GetLastError;
   end;
-
   {$ELSE}
-
-  var
-    Status : Word;
-    XFCB : XFCBRec;
-    DTA  : DTABuf;
-    MediaID : MediaIDType;
-    SaveDTAP : Pointer;
   begin
-    {Save existing DTA and point to ours}
-    GetDTA(SaveDTAP);
-    SetDTA(@DTA);
-
-    {Delete label via FCB}
-    with Regs do begin
-      InitVolXFCB(@XFCB, Drive);
-      DS := Seg(XFCB);
-      DX := Ofs(XFCB);
-      AH := $13;
-      MsDos(Regs);
-      Status := AL;
-    end;
-
-    if Status = 0 then
-      {Change DOS 4 media ID to all blanks}
-      if GetMediaID(Drive, MediaID) = 0 then begin
-        FillChar(MediaID.VolumeLabel, 11, ' ');
-        if SetMediaID(Drive, MediaID) = 0 then ;
-      end;
-
-    {Restore DTA}
-    SetDTA(SaveDTAP);
-
-    {Return status}
-    DeleteVolumeLabel := Status;
+    {FPC port: stubbed, 5 = access denied}
+    DeleteVolumeLabel := 5;
   end;
   {$ENDIF}
 
   function SetVolumeLabel(Drive : Char; VolName : VolumeNameStr) : Word; {!!.14}
-    {-Set the volume label for Drive to VolName. All 11 characters in VolName
-      are significant. If VolName contains less than 11 characters, it will be
-      padded with spaces to 11 characters. Returns 0 for success, or DOS
+    {-Set the volume label for Drive to VolName. Returns 0 for success, or DOS
       error code.}
-  {$IFDEF DPMI}
+  {$IFDEF WINDOWS}
   var
-    Status : Word;
-    MFCB : DosMemRec;
-    MDTA : DosMemRec;
-    XFCBP : XFCBPtr;
-    SaveDTAP : Pointer;
-    Regs : DpmiRegisters;
-    MediaID : MediaIDType;
+    Root : array[0..3] of Char;
+    Buf : array[0..32] of Char;
+    L : Integer;
   begin
-    {Allocate DOS memory blocks}
-    SetVolumeLabel := 8;
-    LongInt(MDTA) := GlobalDosAlloc(SizeOf(DTABuf));
-    if LongInt(MDTA) = 0 then
-      Exit;
-    LongInt(MFCB) := GlobalDosAlloc(SizeOf(XFCBRec));
-    if LongInt(MFCB) = 0 then begin
-      Status := GlobalDosFree(MDTA.Sele);
-      Exit;
-    end;
-
-    {Pad volume label to full length}
-    VolName := Pad(VolName, 11);
-
-    {Save DTA and switch to ours}
-    GetDTA(SaveDTAP);
-    SetDta(Ptr(MDTA.Segm, 0));
-
-    with Regs do begin
-      {Find existing label}
-      XFCBP := Ptr(MFCB.Sele, 0);
-      InitVolXFCB(XFCBP, Drive);
-      FillChar(Regs, SizeOf(DpmiRegisters), 0);
-      DS := MFCB.Segm; {DX already zero}
-      AX := $1100;
-      Status := SimulateRealModeInt($21, Regs);
-      if Status = 0 then begin
-        if Lo(AX) = 0 then begin
-          {Rename existing label}
-          FillChar(Regs, SizeOf(DpmiRegisters), 0);
-          Move(VolName[1], DTABuf(Ptr(MDTA.Sele, $18)^), 11);
-          DS := MDTA.Segm; {DX already zero}
-          AX := $1700;
-          Status := SimulateRealModeInt($21, Regs);
-          if Status = 0 then
-            Status := Lo(AX);
-        end else begin
-          {Create new label}
-          FillChar(Regs, SizeOf(DpmiRegisters), 0);
-          Move(VolName[1], XFCBP^.FileSpec, 11);
-          DS := MFCB.Segm; {DX already zero}
-          AX := $1600;
-          Status := SimulateRealModeInt($21, Regs);
-          if Status = 0 then
-            Status := Lo(AX);
-          if Status = 0 then begin
-            FillChar(Regs, SizeOf(DpmiRegisters), 0);
-            Move(VolName[1], XFCBP^.FileSpec, 11);
-            DS := MFCB.Segm; {DX already zero}
-            AX := $1000;
-            Status := SimulateRealModeInt($21, Regs);
-          end;
-        end;
-      end;
-    end;
-    if Status = 0 then
-      {Set DOS 4 media ID too}
-      if GetMediaID(Drive, MediaID) = 0 then begin
-        Move(VolName[1], MediaID.VolumeLabel, 11);
-        if SetMediaID(Drive, MediaID) = 0 then ;
-      end;
-
-    {Restore previous DTA}
-    SetDTA(SaveDTAP);
-
-    {Return status code}
-    SetVolumeLabel := Status;
-
-    {Free DOS memory}
-    Status := GlobalDosFree(MFCB.Sele);
-    Status := GlobalDosFree(MDTA.Sele);
+    MakeRoot(Drive, Root);
+    L := Length(VolName);
+    while (L > 0) and (VolName[L] = ' ') do
+      Dec(L);
+    if L > 0 then
+      Move(VolName[1], Buf, L);
+    Buf[L] := #0;
+    if SetVolumeLabelA(Root, Buf) then
+      SetVolumeLabel := 0
+    else
+      SetVolumeLabel := GetLastError;
   end;
-
   {$ELSE}
-
-  var
-    XFCB : XFCBRec;
-    DTA  : DTABuf;
-    MediaID : MediaIDType;
-    SaveDTAP : Pointer;
-    Status : Word;
   begin
-    {Save existing DTA and point to ours}
-    GetDTA(SaveDTAP);
-    SetDTA(@DTA);
-
-    {Pad new volume name to full length}
-    VolName := Pad(VolName, 11);
-
-    with Regs do begin
-      {Find existing label, if any}
-      InitVolXFCB(@XFCB, Drive);
-      DS := Seg(XFCB);
-      DX := Ofs(XFCB);
-      AH := $11;
-      MsDos(Regs);
-      if AL = 0 then begin
-        {Label exists, rename it}
-        Move(VolName[1], DTA[$18], 11);
-        DS := Seg(DTA);
-        DX := Ofs(DTA);
-        AH := $17;
-        MsDos(Regs);
-        Status := AL;
-      end else begin
-        {No label exists, create it}
-        DS := Seg(XFCB);
-        DX := Ofs(XFCB);
-        Move(VolName[1], XFCB.FileSpec, 11);
-        AH := $16;
-        MsDos(Regs);
-        Status := AL;
-        if AL = 0 then begin                                           {!!.21}
-          DS := Seg(XFCB);                                             {!!.21}
-          DX := Ofs(XFCB);                                             {!!.21}
-          AH := $10;                                                   {!!.21}
-          MsDos(Regs);                                                 {!!.21}
-        end;                                                           {!!.21}
-      end;
-    end;
-
-    if Status = 0 then
-      {Change DOS 4 media ID too}
-      if GetMediaID(Drive, MediaID) = 0 then begin
-        Move(VolName[1], MediaID.VolumeLabel, 11);
-        if SetMediaID(Drive, MediaID) = 0 then ;
-      end;
-
-    {Restore DTA}
-    SetDTA(SaveDTAP);
-
-    {Return status}
-    SetVolumeLabel := Status;
+    {FPC port: stubbed, 5 = access denied}
+    SetVolumeLabel := 5;
   end;
   {$ENDIF}
 
-  {!!.30 - New}
-  function PhantomExists : Boolean;
-  begin
-    PhantomExists := IsPhantom('A') or IsPhantom('B');
-  end;
-
-  {!!.30 - New}
-  procedure SelectPhantom(Drive : Char);
-    {-Select a phantom drive as default if possible}
-  var
-    N : Byte;
-
-  begin
-    If (DosVersion < $0302) then
-      Exit;
-
-    Drive := UpCase(Drive);
-    N     := Ord(Drive) - Ord('A') + 1;
-
-    FillChar(Regs, SizeOf(Regs), 0);
-    Regs.BL := N;
-    Regs.AX := $330F; { set to next logical drive entry }
-    MsDos(Regs);
-  end;
+  {$I opdos.in1}
 
 {$IFDEF InitAllUnits}
 begin

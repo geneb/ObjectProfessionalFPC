@@ -288,7 +288,7 @@
     RLo, RHi : RangeType;
   begin
     if LongLo = LongHi then begin
-      RLo.rtLong := $80000000;
+      RLo.rtLong := Low(LongInt);
       RHi.rtLong := $7FFFFFFF;
     end
     else begin
@@ -314,7 +314,7 @@
     RLo, RHi : RangeType;
   begin
     if LongLo = LongHi then begin
-      RLo.rtLong := $80000000;
+      RLo.rtLong := Low(LongInt);
       RHi.rtLong := $7FFFFFFF;
     end
     else begin
@@ -343,7 +343,7 @@
   begin
     Picture := CharStr(PicChar, fWidth);
     if LongLo = LongHi then begin
-      RLo.rtLong := $80000000;
+      RLo.rtLong := Low(LongInt);
       RHi.rtLong := $7FFFFFFF;
     end
     else begin

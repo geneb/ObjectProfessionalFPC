@@ -1,10 +1,10 @@
-{$IFDEF Windows}                                                      {!!.20}
+{$IFDEF OPWinTP}                                                      {!!.20}
   !! ERROR: This unit is not compatible with Windows applications !!  {!!.20}
 {$ENDIF}                                                              {!!.20}
 
 {$S-,R-,V-,I-,B-,F+,O+,A-}
 
-{$I OPDEFINE.INC}
+{$I opdefine.inc}
 
 {*********************************************************}
 {*                    OPDATE.PAS 1.30                    *}
@@ -20,11 +20,8 @@ unit OpDate;
 interface
 
 uses
-{$IFDEF Dpmi}
-  Dpmi,
-  WinApi,
-{$ENDIF}
   Dos,
+  OpDtLoc,
   OpInline,
   OpString;
 
@@ -54,7 +51,7 @@ const
     Date1900 = $0001AC05;    {= 01/01/1900}
     Date1980 = $00021E28;    {= 01/01/1980}
     Date2000 = $00023AB1;    {= 01/01/2000}
-    BadDate = $FFFFFFFF;
+    BadDate = -1;            {= $FFFFFFFF as a LongInt (FPC port)}
   {$ELSE}
     MinYear  = 1900;
     MaxYear  = 2078;
@@ -70,7 +67,7 @@ const
 
   MinTime = 0;               {= 00:00:00 am}
   MaxTime = 86399;           {= 23:59:59 pm}
-  BadTime = $FFFFFFFF;
+  BadTime = -1;              {= $FFFFFFFF as a LongInt (FPC port)}
 
   SecondsInDay = 86400;      {number of seconds in a day}
   SecondsInHour = 3600;      {number of seconds in an hour}
@@ -1319,45 +1316,35 @@ const
   function GetCountryInfo(var Dos2 : Boolean; var Info : CountryInfo) : Boolean;
     {-Return a country information table in Info}
   var
-    Regs : Registers;
-{$IFDEF Dpmi}
-  type
-    HiLo = record
-             LoWord, HiWord : Word;
-           end;
-  var
-    R : DpmiRegisters;
-    L : LongInt;
-{$ENDIF}
+    Fmt : Word;
+    DS, TS, TH, DC : Char;
+    H24 : Boolean;
+    Cur : ShortString;
+    CD : Byte;
+    I : Integer;
   begin
-    with Regs do begin
-      {get DOS version}
-      AX := $3000;
-      Intr($21, Regs);
-      Dos2 := (AL = 2);
-
-{$IFNDEF Dpmi}
-      {get pointer to country information table}
-      AX := $3800;
-      DS := Seg(Info);
-      DX := Ofs(Info);
-      Intr($21, Regs);
-      GetCountryInfo := not Odd(Flags);
-{$ELSE}
-      L := GlobalDosAlloc(SizeOf(CountryInfo));                     {!!.22}
-      FillChar(R, SizeOf(R), 0);                                    {!!.22}
-      R.ax := $3800;
-      R.dx := 0;
-      R.ds := HiLo(L).HiWord;
-      GetCountryInfo := False;
-      if SimulateRealModeInt($21, R) = 0 then                       {!!.22}
-        if not Odd(R.Flags) then begin                              {!!.22}
-          GetCountryInfo := True;
-          Move(Ptr(HiLo(L).LoWord, 0)^, Info, SizeOf(CountryInfo)); {!!.22}
-        end;
-      L := GlobalDosFree(HiLo(L).LoWord);
-{$ENDIF}
+    { FPC port: the DOS country-info call is replaced by RTL locale settings }
+    GetLocaleDateInfo(Fmt, DS, TS, TH, DC, H24, Cur, CD);
+    Dos2 := False;
+    FillChar(Info, SizeOf(Info), 0);
+    with Info do begin
+      DateFormat := Fmt;
+      FillChar(CurrencyStr, SizeOf(CurrencyStr), 0);
+      for I := 1 to 4 do
+        if I <= Length(Cur) then
+          CurrencyStr[I] := Cur[I];
+      CommaSym2 := TH;
+      DecimalSym2 := DC;
+      DateSym := DS;
+      TimeSym := TS;
+      CurrencyForm := 0;
+      Decimals := CD;
+      if H24 then
+        TimeForm := 1
+      else
+        TimeForm := 0;
     end;
+    GetCountryInfo := True;
   end;
 
   function InternationalDate(WholeYear, ZeroPad : Boolean) : DateString;

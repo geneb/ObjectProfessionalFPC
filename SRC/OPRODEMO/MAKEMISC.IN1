@@ -122,16 +122,8 @@ const
   var
     Paras : LongInt;
   begin
-{$IFDEF DPMI}                        {!!.20}
-    MemInUse := TotalAvail-MemAvail; {!!.20}
-{$ELSE}                              {!!.20}
-    {$IFDEF Heap6}
-    Paras := OS(HeapEnd).S-OS(HeapOrg).S;
-    {$ELSE}
-    Paras := (OS(FreePtr).S+$1000)-OS(HeapOrg).S;
-    {$ENDIF}
-    MemInUse := (Paras shl 4)-MemAvail;
-{$ENDIF}                             {!!.20}
+{FPC port: heap layout (HeapOrg/FreePtr) does not exist; use FPC heap status}
+    MemInUse := GetFPCHeapStatus.CurrHeapUsed;
   end;
 
   function ColorName(Attr : Byte) : String;
@@ -468,7 +460,7 @@ const
       StatusForm : string[80] =
       {         1         2         3         4         5         6         7         8}
       {12345678901234567890123456789012345678901234567890123456789012345678901234567890}
-      '<Enter> Accept                     ³ Resize  Width x   Height x  Row x   Col x  ';
+      '<Enter> Accept                     '#$B3' Resize  Width x   Height x  Row x   Col x  ';
       DragOrSize : array[Boolean] of string[6] = ('Resize', ' Move ');
       ExtraPrompt : array[Boolean] of string[19] = (
         '<ScrollLock> Toggle', '<Esc> Cancel');
@@ -517,17 +509,18 @@ const
       {-Draw the frame on screen}
     begin
       {make a working copy of the screen}
+      {FPC port: copy via buffer pointers instead of video segments}
       with wStack.wsScreen do
-        Move(Mem[vsVideoSeg:0], Mem[VS.vsVideoSeg:0], (vRows*vCols) shl 1);
+        Move(vsVideoPtr^, VS.vsVideoPtr^, (vRows*vCols) shl 1);
 
       {draw the frame on the working copy}
       VS.Activate;
       if Dragging then
         {use double line frame}
-        FrameIt(XL, YL, XH, YH, 'Î', FrameTypes[3])
+        FrameIt(XL, YL, XH, YH, #$CE, FrameTypes[3])
       else
         {use single line frame}
-        FrameIt(XL, YL, XH, YH, 'Å', FrameTypes[2]);
+        FrameIt(XL, YL, XH, YH, #$C5, FrameTypes[2]);
       DrawStatusLine;
       VS.Deactivate;
 

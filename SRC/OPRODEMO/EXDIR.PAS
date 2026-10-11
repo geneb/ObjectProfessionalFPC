@@ -1,6 +1,6 @@
 program DirectoryListExample;  {EXDIR.PAS}
 uses
-  Dos, OpString, OpCrt, OpRoot, OpCmd, OpFrame, OpWindow, OpPick, OpDir;
+  Dos, OpInline, OpString, OpCrt, OpRoot, OpCmd, OpFrame, OpWindow, OpPick, OpDir;
 var
   Dir : DirList;
   Finished : Boolean;
@@ -44,4 +44,3 @@ begin
   until Finished;
   Dir.Done;
 end.
-

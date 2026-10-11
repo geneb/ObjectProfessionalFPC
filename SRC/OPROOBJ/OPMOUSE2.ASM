@@ -438,4 +438,3 @@ GetMousePage    ENDP
 
 CODE    ENDS
         END
-

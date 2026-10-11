@@ -1,12 +1,12 @@
 
-{$IFDEF Windows}                                                      {!!.20}
+{$IFDEF OPWinTP}                                                      {!!.20}
   !! ERROR: This unit is not compatible with Windows applications !!  {!!.20}
 {$ENDIF}                                                              {!!.20}
 
 {$S-,R-,V-,I-,B-,F+,O+,A-}
 
 {Conditional defines that may affect this unit}
-{$I OPDEFINE.INC}
+{$I opdefine.inc}
 
 {*********************************************************}
 {*                   OPMENU.PAS 1.30                     *}
@@ -37,7 +37,7 @@ uses
   {$ENDIF}         {!!.03}
   ;
 
-  {$I OPMENU.ICD}  {configuration data}
+  {$I opmenu.icd}  {configuration data}
 
   {.F-}
 const
@@ -82,7 +82,7 @@ const
   DefItemListOptions : Byte = 0;  {!!.01}
 
   {---- Special key value that indicates no key ----}
-  mnNotAKey         = $FFFFFFFF;  {Use with ItemsDone to set to first item}
+  mnNotAKey         = -1;  {Use with ItemsDone to set to first item}
 
   inAllocConsPtr    : Boolean = False; {Used by MAKEMENU only}
 
@@ -610,8 +610,8 @@ var
 
 implementation
 
-  {$I OPMENU.IN1}       {Items, item lists, submenus}
-  {$I OPMENU.IN2}       {Menu object}
+  {$I opmenu.in1}       {Items, item lists, submenus}
+  {$I opmenu.in2}       {Menu object}
 
 begin
   {Initialize command processor}

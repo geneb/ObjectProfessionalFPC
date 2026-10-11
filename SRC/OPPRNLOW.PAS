@@ -1,6 +1,6 @@
 {$S-,R-,V-,I-,B-,F+,O+,A-}
 
-{$I OPDEFINE.INC}
+{$I opdefine.inc}
 
 {*********************************************************}
 {*                 OPPRNLOW.PAS 1.30                     *}
@@ -12,7 +12,7 @@ unit OpPrnLow;
   {-Impements routines for outputing data to printer (and printer like)
     devices.}
 
-{$IFDEF Windows}                                                      {!!.20}
+{$IFDEF OPWinTP}                                                      {!!.20}
   !! ERROR: This unit is not compatible with Windows applications !!  {!!.20}
 {$ENDIF}                                                              {!!.20}
 
@@ -21,7 +21,6 @@ interface
 uses
   Dos,
   OpConst,        {!!.20}
-  OpInline,
   OpRoot,
   OpDos;
 
@@ -258,28 +257,14 @@ type
       {.Z-}
     end;
 
-  TextBufPtr = ^TextBuf;
-  {The TextRec type for Printer object based }
-  PrnTextRec =
+  { FPC port: the printer text-file device uses the RTL's TextRec; the
+    printer object pointer and ID are kept in its UserData area (PrnUserRec) }
+  PrnTextRec = TextRec;
+  PrnUserRec =
     record
-      Handle     : Word;
-      Mode       : Word;
-      BufSize    : Word;
-      Private    : Word;
-      BufPos     : Word;
-      BufEnd     : Word;
-      BufPtr     : TextBufPtr;
-      OpenFunc   : Pointer;
-      InOutFunc  : Pointer;
-      FlushFunc  : Pointer;
-      CloseFunc  : Pointer;
-      { 16 byte user data area, we use 8 bytes }
       PrnObject  : BasePrinterPtr;
       PrnID      : LongInt;
-      UserData   : array[1..8] of Char;
-      Name       : array[0..79] of Char;
-      Buffer     : TextBuf;
-     end;
+    end;
 
 const
   NilPointer : Pointer = Nil;
@@ -289,6 +274,10 @@ const
                                              'PRN','Disk File','User Defined');
 var
   NoXlatFunc : XlatFunc absolute NilPointer;
+
+  { FPC port: names of the OS devices (or files) that LPT1..LPT3 and the DOS
+    PRN handle are mapped to.  Change these before the first printer output. }
+  PrinterDeviceNames : array[0..2] of string;
 
 {.Z+}
 {$IFDEF UseStreams}
@@ -323,51 +312,17 @@ function CallPrnStatus(var F : Text) : Word;
 
 {.Z+}
 function Int17Out(Ch : Char; LPTNo : Word) : Byte;
-{ send a character to LPTNo via ROM BIOS int 17h func 0h }
-Inline(
-  $5A/                   {  pop  dx        ; get printer number}
-  $58/                   {  pop  ax        ; get character}
-  $30/$E4/               {  xor  ah,ah     ; set AH for func 0}
-  $CD/$17/               {  int  $17       ; printer bios function call}
-  $86/$E0);              {  xchg al,ah     ; put byte result in AL}
+{ send a character to LPTNo (FPC port: to the OS printer device); returns a
+  BIOS-style status byte }
 
 function PrnTest1Prim(ErrorCode : Word) : Boolean;
   {-Printer ready test 1}
-Inline(
-  $58/                   {  pop     ax}
-  $34/$80/               {  xor     al,$80}
-  $A8/$A9/               {  test    al,$A9}
-  $75/$04/               {  jnz     PrnError}
-  $B0/$01/               {  mov     al,1}
-  $EB/$02/               {  jmp     short ExitPoint}
-                         {PrnError:}
-  $30/$C0);              {  xor     al,al}
-                         {ExitPoint:}
 
 function PrnTest2Prim(ErrorCode : Word) : Boolean;
   {-Printer ready test 2}
-Inline(
-  $58/                   {  pop     ax}
-  $A8/$29/               {  test    al,$29}
-  $75/$04/               {  jnz     PrnError}
-  $B0/$01/               {  mov     al,1}
-  $EB/$02/               {  jmp     short ExitPoint}
-                         {PrnError:}
-  $30/$C0);              {  xor     al,al}
-                         {ExitPoint:}
 
 function PrnTest3Prim(ErrorCode : Word) : Boolean;
   {-Printer ready test 3}
-Inline(
-  $58/                   {  pop   ax}
-  $24/$A0/               {  and   al,$A0}
-  $79/$06/               {  jns   PrnError}
-  $7A/$04/               {  jpe   PrnError}
-  $B0/$01/               {  mov   al,1}
-  $EB/$02/               {  jmp   short ExitPoint}
-                         {PrnError:}
-  $30/$C0);              {  xor   al,al}
-                         {ExitPoint:}
 
 function PutPrim(C : Char; LPTNo : Word) : Word;
   {-Puts a single character to specified LPT number}
@@ -386,166 +341,195 @@ function DosFileOut(Character : Char; Handle : Word) : Word;
 
 implementation
 
-  function DosClose(Handle : Word) : Word;
-    {-Close a DOS file}
+uses
+  SysUtils;
+
+const
+  MaxHandles = 32;
+  DosErrFileNotFound = 2;
+  DosErrAccessDenied = 5;
+  DosErrInvalidHandle = 6;
+  DosErrWriteFault = 29;
+  DosErrTooManyFiles = 4;
+
+var
+  {FPC port: the DOS handles used by this unit are indexes into this table
+   (1..MaxHandles); handle PrnHandle (4) maps to the PRN device}
+  HandleTable : array[1..MaxHandles] of THandle;
+  HandleUsed : array[1..MaxHandles] of Boolean;
+  LptHandle : array[0..2] of THandle;
+  LptOpened : array[0..2] of Boolean;
+  PrnDevHandle : THandle;
+  PrnDevOpened : Boolean;
+
+  function OpenOutput(const Name : string; var H : THandle) : Boolean;
+    {-Open a device or file for output, creating it if necessary}
   var
-    Regs : Registers;
+    Opened : Boolean;
   begin
-    with Regs do begin
-      AH := $3E;
-      BX := Handle;
-      MsDos(Regs);
-      if Odd(Flags) then
-        DosClose := AX
-      else
-        DosClose := 0;
+    H := FileOpen(Name, fmOpenWrite or fmShareDenyNone);
+    if H = THandle(-1) then
+      H := FileCreate(Name);
+    Opened := (H <> THandle(-1));
+    if Opened then
+      FileSeek(H, Int64(0), 2);                {append; harmless for devices}
+    OpenOutput := Opened;
+  end;
+
+  function LptOpen(LPTNo : Word) : Boolean;
+  begin
+    LptOpen := False;
+    if LPTNo > 2 then
+      Exit;
+    if not LptOpened[LPTNo] then
+      LptOpened[LPTNo] := OpenOutput(PrinterDeviceNames[LPTNo], LptHandle[LPTNo]);
+    LptOpen := LptOpened[LPTNo];
+  end;
+
+  function PrnOpenDev : Boolean;
+  begin
+    if not PrnDevOpened then
+      PrnDevOpened := OpenOutput(PrinterDeviceNames[0], PrnDevHandle);
+    PrnOpenDev := PrnDevOpened;
+  end;
+
+  function HandleFor(Handle : Word; var H : THandle) : Boolean;
+    {-Map a DOS-style handle to an RTL handle}
+  begin
+    HandleFor := False;
+    if Handle = PrnHandle then begin
+      if PrnOpenDev then begin
+        H := PrnDevHandle;
+        HandleFor := True;
+      end;
+    end
+    else if (Handle >= 1) and (Handle <= MaxHandles) and HandleUsed[Handle] then begin
+      H := HandleTable[Handle];
+      HandleFor := True;
     end;
+  end;
+
+  function NewHandle(H : THandle; var Handle : Word) : Word;
+  var
+    I : Word;
+  begin
+    for I := 1 to MaxHandles do
+      if not HandleUsed[I] then begin
+        HandleUsed[I] := True;
+        HandleTable[I] := H;
+        Handle := I;
+        NewHandle := 0;
+        Exit;
+      end;
+    FileClose(H);
+    Handle := 0;
+    NewHandle := DosErrTooManyFiles;
+  end;
+
+  function DosClose(Handle : Word) : Word;
+    {-Close a file}
+  begin
+    DosClose := 0;
+    if (Handle >= 1) and (Handle <= MaxHandles) and HandleUsed[Handle] then begin
+      FileClose(HandleTable[Handle]);
+      HandleUsed[Handle] := False;
+    end
+    else if Handle <> PrnHandle then
+      DosClose := DosErrInvalidHandle;
   end;
 
   function DosCreate(Name : PathStr; var Handle : Word) : Word;
-
   var
-    Regs : Registers;
+    H : THandle;
   begin
-    Name := Name + #0;
-    with Regs do begin
-      AX := $3C00;
-      CX := 0;
-      DS := Seg(Name);
-      DX := Ofs(Name[1]);
-      MsDos(Regs);
-      if Odd(Flags) then begin
-        DosCreate := AX;
-        Handle := 0;
-      end
-      else begin
-        Handle := AX;
-        DosCreate := 0;
-      end;
-    end;
-
-  end;
-
-  function DosSeekEOF(Handle : Word) : Word; {!!.20}
-  var
-    Regs : Registers;
-  begin
-    with Regs do begin
-      AX := $4202;
-      BX := Handle;
-      CX := 0;
-      DX := 0;
-      MsDos(Regs);
-      if Odd(Flags) then
-        DosSeekEOF := AX
-      else
-        DosSeekEOF := 0;
-    end;
+    H := FileCreate(Name);
+    if H = THandle(-1) then begin
+      Handle := 0;
+      DosCreate := DosErrAccessDenied;
+    end
+    else
+      DosCreate := NewHandle(H, Handle);
   end;
 
   function DosAppend(Name : PathStr; var Handle : Word) : Word; {!!.20}
-
   var
-    Regs : Registers;
+    H : THandle;
   begin
-    Name := Name + #0;
-    with Regs do begin
-      AX := $3D02;
-      DS := Seg(Name);
-      DX := Ofs(Name[1]);
-      MsDos(Regs);
-      if Odd(Flags) then begin
-        if AX = 2 then
-          DosAppend := DosCreate(Name, Handle)
-        else
-          DosAppend := AX;
-      end
-      else begin
-        Handle := AX;
-        DosAppend := DosSeekEOF(Handle);
-      end;
+    H := FileOpen(Name, fmOpenReadWrite or fmShareDenyWrite);
+    if H = THandle(-1) then begin
+      DosAppend := DosCreate(Name, Handle);
+      Exit;
     end;
-
+    FileSeek(H, Int64(0), 2);
+    DosAppend := NewHandle(H, Handle);
   end;
 
-  function DosFileOutPrim(C : Char; Handle : Word) : Word;
-  Inline(
-    $5B/                   {  pop  bx        ; get handle}
-    $8C/$DF/               {  mov  di,ds     ; save ds in di}
-    $8C/$D0/               {  mov  ax,ss     ; move ss to ds}
-    $8E/$D8/               {  mov  ds,ax     ;}
-    $89/$E2/               {  mov  dx,sp     ; ofs(C) := SP}
-    $B9/$01/$00/           {  mov  cx,1      ; one char to write}
-    $B4/$40/               {  mov  ah,$40    ; write file or device}
-    $CD/$21/               {  int  $21       ; dos call}
-    $72/$02/               {  jc   DFOExit   ; error if carry flag set}
-    $31/$C0/               {  xor  ax,ax     ; no error, return 0}
-                           {DFOExit:}
-    $5A/                   {  pop  dx        ; remove C from stack}
-    $8E/$DF);              {  mov  ds,di     ; restore DS}
-
   function DosFileOut(Character : Char; Handle : Word) : Word;
-
+    {-output one character to a file or device}
+  var
+    H : THandle;
   begin
-    DosFileOut := DosFileOutPrim(Character,Handle);
+    if not HandleFor(Handle, H) then begin
+      DosFileOut := DosErrInvalidHandle;
+      Exit;
+    end;
+    if FileWrite(H, Character, 1) = 1 then
+      DosFileOut := 0
+    else
+      DosFileOut := DosErrWriteFault;
   end;
 
   function DosDeviceReady(Handle : Word) : Boolean;
+    {FPC port: a device is considered ready if its handle is valid}
   var
-    Regs : Registers;
-
+    H : THandle;
   begin
-    with Regs do begin
-      DosDeviceReady := False;
-      {first determine that this is a character device using IOCtrl 0}
-      AX := $4400;
-      BX := Handle;
-      MsDos(Regs);
-      if Odd(Flags) then
-        Exit;
-      {if it is a block device, indicate it is ready and exit}
-      if not FlagIsSet(DX,$40) then begin
-        DosDeviceReady := True;
-        Exit;
-      end;
-
-      {now call IOCtrl function 7 to get output status}
-      AX := $4407;
-      BX := Handle;
-      MsDos(Regs);
-      if Odd(Flags) then
-        Exit;
-      DosDeviceReady := AL = $FF;
-    end;
+    DosDeviceReady := HandleFor(Handle, H);
   end;
 
-  function Int17ResetPrim(LPTNo : Word) : Word;
-  Inline(
-    $5A/                   {  pop   dx}
-    $B4/$01/               {  mov   ah,1}
-    $CD/$17/               {  int   $17}     {!!.01}
-    $86/$C4/               {  xchg  ah,al}
-    $30/$E4);              {  xor   ah,ah}   {!!.01}
+  { FPC port: BIOS status bytes are emulated.  $90 = selected + not busy;
+    $29 = timed out + I/O error + out of paper (device cannot be opened) }
+  function LptStatus(LPTNo : Word) : Word;
+  begin
+    if LptOpen(LPTNo) then
+      LptStatus := bpSelected or bpNotBusy
+    else
+      LptStatus := bpTimedOut or bpIOError or bpOutOfPaper;
+  end;
+
+  function Int17Out(Ch : Char; LPTNo : Word) : Byte;
+  begin
+    if LptOpen(LPTNo) and (FileWrite(LptHandle[LPTNo], Ch, 1) = 1) then
+      Int17Out := bpSelected or bpNotBusy
+    else
+      Int17Out := bpTimedOut or bpIOError;
+  end;
+
+  function PrnTest1Prim(ErrorCode : Word) : Boolean;
+  begin
+    PrnTest1Prim := ((Byte(ErrorCode) xor $80) and $A9) = 0;
+  end;
+
+  function PrnTest2Prim(ErrorCode : Word) : Boolean;
+  begin
+    PrnTest2Prim := (Byte(ErrorCode) and $29) = 0;
+  end;
+
+  function PrnTest3Prim(ErrorCode : Word) : Boolean;
+  begin
+    PrnTest3Prim := (Byte(ErrorCode) and $A0) = $80;
+  end;
 
   function Int17Reset(LPTNo : Word) : Word;
-
+    {-Reset the printer (FPC port: just reports status)}
   begin
-    Int17Reset := Int17ResetPrim(LPTNo);
+    Int17Reset := LptStatus(LPTNo);
   end;
 
-  function LptReadyPrim(LPTNo : Word) : Word;
-  Inline(
-    $5A/                   {  pop   dx}
-    $B4/$02/               {  mov   ah,2}
-    $CD/$17/               {  int   $17}     {!!.01}
-    $86/$C4/               {  xchg  ah,al}
-    $30/$E4);              {  xor   ah,ah}   {!!.01}
-
-
   function LptDeviceReady(LPTNo : Word) : Word;
-
+    {-Get current (emulated) status of printer}
   begin
-    LptDeviceReady := LptReadyPrim(LPTNo);
+    LptDeviceReady := LptStatus(LPTNo);
   end;
 
   constructor BasePrinter.Init(PrnName : PathStr;
@@ -795,10 +779,13 @@ implementation
   end;
 
   procedure DosPrinter.PrnFlush;
-
+  var
+    H : THandle;
   begin
-    if FlushDosBuffers(pDataWord) then
-      pError(0,FlushCall)
+    if HandleFor(pDataWord, H) then begin
+      FileFlush(H);                       {not all devices support flushing}
+      pError(0,FlushCall);
+    end
     else
       pError(ecTooManyFiles, FlushCall);
   end;
@@ -1151,54 +1138,43 @@ implementation
       Table[C] := C;
   end;
 
-  function TFDDOutput(var F : PrnTextRec) : Integer;
-
+  function TFDDOutput(var F : TextRec) : LongInt;
   var
     ErrorCode        : Integer;
+    U                : PrnUserRec absolute F.UserData;
   begin
-    with F, PrnObject^ do begin
-      PrnPutBlock(BufPtr^,BufPos);
+    with U.PrnObject^ do begin
+      PrnPutBlock(F.BufPtr^, Word(F.BufPos));
       ErrorCode := PrnError;
       TFDDOutput := ErrorCode;
-(*                                            {!!.11}
-      if ErrorCode = 0 then                   {!!.11}
-*)                                            {!!.11}
-        BufPos := 0
+      F.BufPos := 0
     end;
   end;
 
-  function TFDDOutputFlush(var F : PrnTextRec) : Integer;
-
+  function TFDDOutputFlush(var F : TextRec) : LongInt;
   var
     ErrorCode        : Integer;
-
+    U                : PrnUserRec absolute F.UserData;
   begin
     ErrorCode := TFDDOutput(F);
-      if ErrorCode = 0 then
-      with F, PrnObject^ do begin
+    if ErrorCode = 0 then
+      with U.PrnObject^ do begin
         PrnFlush;
         ErrorCode := PrnError;
       end;
     TFDDOutputFlush := ErrorCode;
   end;
 
-  function TFDDOpen(var F : PrnTextRec) : Integer;
-
+  function TFDDOpen(var F : TextRec) : LongInt;
   begin
-(*                                                 {!!.03}
-    with F, PrnObject^ do
-      if PrnOpen then
-        TFDDOpen := 0
-      else
-        TFDDOpen := PrnError;
-*)                                                 {!!.03}
-    TFDDOpen := 0                                  {!!.03}
+    TFDDOpen := 0
   end;
 
-  function TFDDClose(var F : PrnTextRec) : Integer;
-
+  function TFDDClose(var F : TextRec) : LongInt;
+  var
+    U                : PrnUserRec absolute F.UserData;
   begin
-    with F, PrnObject^ do begin
+    with U.PrnObject^ do begin
       PrnClose;
       TFDDClose := PrnError;
     end;
@@ -1209,10 +1185,11 @@ implementation
   { like Turbo's assign, except associates Text variable with one of the LPTs }
   var
     PrinterName : String;
-    PrnF        : PrnTextRec absolute F;
-
+    PrnF        : TextRec absolute F;
+    U           : PrnUserRec absolute PrnF.UserData;
   begin
     with PrnF do begin
+      Handle      := THandle(-1);
       Mode        := fmClosed;
       BufSize     := SizeOf(Buffer);
       BufPtr      := @PrnF.Buffer;
@@ -1220,11 +1197,13 @@ implementation
       CloseFunc   := @TFDDClose;
       InOutFunc   := @TFDDOutput;
       FlushFunc   := @TFDDOutputFlush;
-      PrnObject   := @PrinterObj;
-      PrnID       := PrnTfddID;
+      U.PrnObject := @PrinterObj;
+      U.PrnID     := PrnTfddID;
       PrinterName := PrinterObj.NameOfPrn;
-      Move(PrinterName[1],Name,Length(PrinterName)+1);
+      FillChar(Name, SizeOf(Name), 0);
+      Move(PrinterName[1], Name, Length(PrinterName));
       BufPos := 0; { reset BufPos }
+      BufEnd := 0;
     end;
   end;
 
@@ -1232,14 +1211,13 @@ implementation
     {-Return a pointer to the Prn Object associated with a Text file.
       Returns Nil if not a text file associated with a Prn object}
   var
-    T : PrnTextRec absolute F;
-
+    T : TextRec absolute F;
+    U : PrnUserRec absolute T.UserData;
   begin
-    with T do
-      if PrnID = PrnTfddID then
-        GetPrnObject := PrnObject
-      else
-        GetPrnObject := Nil;
+    if U.PrnID = PrnTfddID then
+      GetPrnObject := U.PrnObject
+    else
+      GetPrnObject := Nil;
   end;
 
   function CallPrnStatus(var F : Text) : Word;
@@ -1255,7 +1233,29 @@ implementation
       CallPrnStatus := $FFFF;
   end;
 
-{$IFDEF InitAllUnits}
+  procedure ClosePrinterHandles;
+  var
+    I : Integer;
+  begin
+    for I := 0 to 2 do
+      if LptOpened[I] then
+        FileClose(LptHandle[I]);
+    if PrnDevOpened then
+      FileClose(PrnDevHandle);
+  end;
+
 begin
+  FillChar(HandleUsed, SizeOf(HandleUsed), 0);
+  FillChar(LptOpened, SizeOf(LptOpened), 0);
+  PrnDevOpened := False;
+{$IFDEF UNIX}
+  PrinterDeviceNames[0] := '/dev/lp0';
+  PrinterDeviceNames[1] := '/dev/lp1';
+  PrinterDeviceNames[2] := '/dev/lp2';
+{$ELSE}
+  PrinterDeviceNames[0] := 'PRN';
+  PrinterDeviceNames[1] := 'LPT2';
+  PrinterDeviceNames[2] := 'LPT3';
 {$ENDIF}
+  AddExitProc(ClosePrinterHandles);
 end.

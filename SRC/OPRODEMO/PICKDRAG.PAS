@@ -15,7 +15,7 @@
 *)
 
 {$R-,S-}
-{$I OPDEFINE.INC}
+{$I opdefine.inc}
 
 {$IFDEF UseDrag}
   {$DEFINE UsingDrag}

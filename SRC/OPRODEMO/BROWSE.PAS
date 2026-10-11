@@ -7,7 +7,7 @@
 {*                 All rights reserved.                  *}
 {*********************************************************}
 
-{$I OPDEFINE.INC}
+{$I opdefine.inc}
 
 {***************************************************************************
  This program will use features activated with the following defines:
@@ -18,6 +18,7 @@ program Browse;
   {-File browser}
 
 uses
+  OpInline,                  {FPC port: MaxAvail/MemAvail}
   Dos,
   OpCmd,
   OpCrt,
@@ -283,7 +284,7 @@ begin
 
     {$IFDEF UseScrollBars}
     {add a custom scroll bar}
-    wFrame.AddCustomScrollBar(frRR, 0, MaxLongInt, 1, 0, '²', '°', OurColorSet);
+    wFrame.AddCustomScrollBar(frRR, 0, MaxLongInt, 1, 0, #$B2, #$B0, OurColorSet);
     {$ENDIF}
 
     {set procedure pointers}

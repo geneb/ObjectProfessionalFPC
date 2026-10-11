@@ -1,6 +1,6 @@
 {$R-,S-,I-,V-,B-,F+,O+}
 
-{$I OPDEFINE.INC}
+{$I opdefine.inc}
 
 {***************************************************************************
  This unit requires that OPDEFINE.INC activate the following defines:
@@ -85,7 +85,7 @@ const
   DefXH         = 4;
   DefYH         = 2;
   DefOptions    : LongInt = wBordered+wClear+wUserContents+wCoversOnDemand; {!!.01}
-  DefFrame      : FrameArray = 'ÕÔ¸¾ÍÍ³³';
+  DefFrame      : FrameArray = #$D5#$D4#$B8#$BE#$CD#$CD#$B3#$B3;
   DefDelay      : Word = 15;
   DefExplosions : Boolean = False;
   DefSound      : Boolean = False;
@@ -336,10 +336,10 @@ type
         {-Display the menu info window and wait for a keypress}
     end;
 
-  {$I MMMAIN.IN1}    {Initialization, library and object I/O}
-  {$I MMMAIN.IN2}    {Many menu making commands}
-  {$I MMMAIN.IN3}    {Generate source and documentation files}
-  {$I MMMAIN.IN4}    {Many more menu making commands}
+  {$I mmmain.in1}    {Initialization, library and object I/O}
+  {$I mmmain.in2}    {Many menu making commands}
+  {$I mmmain.in3}    {Generate source and documentation files}
+  {$I mmmain.in4}    {Many more menu making commands}
 
   procedure ProtectMenuItems;
     {-Protect menu items as necessary}

@@ -15,4 +15,4 @@ begin
   MyPrinter.FormFeed;
   MyPrinter.Done;
 end.
-
+

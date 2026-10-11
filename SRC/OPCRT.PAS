@@ -1,10 +1,6 @@
 {$S-,R-,V-,I-,B-,F-,O-,A-}
 
-{$IFDEF Dpmi}                      {!!.20}
-{$C FIXED PRELOAD PERMANENT}       {!!.20}
-{$ENDIF}                           {!!.20}
-
-{$I OPDEFINE.INC}
+{$I opdefine.inc}
 
 {*********************************************************}
 {*                    OPCRT.PAS 1.30                     *}
@@ -15,19 +11,16 @@
 unit OpCrt;
   {-Alternate CRT interface unit. Replaces Turbo's CRT unit.}
 
-{$IFDEF Windows}
+{$IFDEF OPWinTP}
   !! ERROR: This unit is not compatible with Windows applications !!
 {$ENDIF}
 
-interface
+  {FPC port: the screen is a cell buffer (FPC Video unit's VideoBuf, one word
+   per cell: low byte = CP437 character, high byte = DOS attribute). The
+   real-mode assembly (OPCRT.ASM etc.) has been re-implemented in Pascal in
+   the implementation section. The Crt-patching "UseCrt" mode is gone.}
 
-uses
-  Dpmi,                   {!!.20}
-  OpInline,
-  {$IFDEF UseCrt}
-  Crt,
-  {$ENDIF}
-  Dos;
+interface
 
   {low-level frame stuff}
 const
@@ -82,7 +75,7 @@ const
   DetectMultitasking : Boolean = False;
   BiosScroll : Boolean = True; {False to use OPCRT routines for clean scrolling}
 const
-  FrameChars : FrameArray = 'ÕÔ¸¾ÍÍ³³';
+  FrameChars : FrameArray = #$D5#$D4#$B8#$BE#$CD#$CD#$B3#$B3;
 const
   InsertCursor   : CursorType = cuFat;
   OvertypeCursor : CursorType = cuNormal;
@@ -100,8 +93,6 @@ type
 
 {from Turbo's CRT unit}
 
-{$IFNDEF UseCrt}
-
 var
   CheckBreak : Boolean;      {enable Ctrl-Break checking}
   CheckEOF : Boolean;        {enable Ctrl-Z checking}
@@ -112,21 +103,7 @@ var
   WindMax : Word;            {Window XHigh and YHigh: 0..24, 0..79 format}
   LastMode : Word;           {current video mode in low byte / 8x8 flag in high byte}
 const
-  CrtCheck : Boolean = True; {for internal use}
-
-{$ELSE}
-
-var
-  CheckBreak : Boolean absolute Crt.CheckBreak;
-  CheckEOF : Boolean absolute Crt.CheckEOF;
-  DirectVideo : Boolean absolute Crt.DirectVideo;
-  CheckSnow : Boolean absolute Crt.CheckSnow;
-  TextAttr : Byte absolute Crt.TextAttr;
-  WindMin : Word absolute Crt.WindMin;
-  WindMax : Word absolute Crt.WindMax;
-  LastMode : Word absolute Crt.LastMode;
-
-{$ENDIF}
+  CrtCheck : Boolean = True; {for internal use (unused in FPC port)}
 
 {unique to Object Professional version}
 
@@ -141,7 +118,7 @@ var
   WhichHerc : HercCardType;  {type of Hercules card installed}
   InTextMode : Boolean;      {set to false when in graphics mode}
   NormalAttr : Byte;         {attribute for NormVideo}
-  VideoSegment : Word;       {current segment for video memory}
+  VideoSegment : Word;       {legacy token only ($B800); see VideoBuffer}
   BufLen : Word;             {maximum length of string for Read/Ln}
   MultiTaskingOn : Boolean;  {needed to support DesqView, TaskView}
   OneMS : Word;              {loop count used for a 1 ms delay}
@@ -151,9 +128,19 @@ var
   CurrentHeight : Word;      {current height of display - 1}
 var
   {hooks for virtual screens in OPWINDOW}
-  VirtualSegment : Word;     {alternate segment for video memory}
+  VirtualSegment : Word;     {legacy token only; assigning it does NOT redirect
+                              output in the FPC port -- set VirtualBuffer}
   VirtualWidth : Word;       {alternate width of display}
   VirtualHeight : Word;      {alternate height of display}
+
+  {FPC port additions: pointer-based replacements for VideoSegment and
+   VirtualSegment. All FastXXX/MoveScreen/SaveWindow/RestoreWindow routines
+   read and write cells at VirtualBuffer (row-major, VirtualWidth words per
+   row, word = Ord(Char) or (Attr shl 8)). The physical screen buffer is
+   VideoBuffer; the screen is refreshed (see FlushScreen) only when
+   VirtualBuffer = VideoBuffer.}
+  VideoBuffer : Pointer;
+  VirtualBuffer : Pointer;
 const
   DisplayOverride : ShortInt = -1; {use to override auto-detection of displays}
 
@@ -309,13 +296,6 @@ const
 
   function MakeHiddenAttr(A : Byte) : Byte;
     {-Make foreground and background colors the same}
-  inline(
-    $58/                   {pop ax}
-    $24/$F0/               {and al,$f0  ;isolate background color}
-    $88/$C4/               {mov ah,al   ;get new foreground into AH}
-    $B1/$04/               {mov cl,4}
-    $D2/$EC/               {shr ah,cl}
-    $08/$E0);              {or al,ah    ;merge it into AL}
 
 type
   ColorMapTable = array[0..255] of Byte;
@@ -624,139 +604,244 @@ procedure ReInitCrt;
 procedure DelayCalibrate;
   {-Perform delay calibration}
 
+  {FPC port additions}
+
+procedure FlushScreen;
+  {-Copy pending screen changes (and cursor state) to the real console.
+    Called automatically by KeyPressed/ReadKey/ReadKeyWord/CheckKbd/Delay,
+    Write/Read through the CRT text file and at exit. Call it yourself
+    before long computations or when waiting without polling the keyboard.}
+
+procedure DoneCrt;
+  {-Restore the console (keyboard, video mode, code page). Called
+    automatically from an exit procedure; safe to call more than once.}
+
+function CrtHasConsole : Boolean;
+  {-True if a real console is attached (False when stdin/stdout are redirected
+    and OPCRT works on a private in-memory screen only)}
+
+const
+  ImmediateFlush : Boolean = False;
+    {set True to update the console after every screen primitive (slow)}
+
   {==========================================================================}
 
 implementation
 
-type
-  BufPtr = ^BufferArray;
-  BufferArray = array[0..MaxInt] of Char;
-  BiosNameType = Array[1..6] of Char;                               {!!.20}
-var
-  {$IFNDEF UseCrt}
-  SystemSeg : Word;
+uses
+  {$IFDEF UNIX}
+  BaseUnix, termio,
   {$ENDIF}
+  SysUtils, Video, Keyboard, OpKeyHk;
+
+const
+  MaxPages = 8;
+  KeyQSize = 16;
+
+type
+  PCells = ^TCells;
+  TCells = array[0..16777215] of Word;  {cell = Ord(Char) or (Attr shl 8)}
+  BufPtr = ^BufferArray;
+  BufferArray = array[0..65534] of Char;
+
+var
   SaveExitProc : Pointer;
-  BiosScanLines : ^Word; {absolute $40 : $60;}                      {!!.20}
-  IsCompaq : Boolean;
-  CompaqBiosName : BiosNameType; {absolute $FFFE : $000A;}          {!!.20}
-  IsZenith : Boolean absolute IsCompaq;
-  ZenithBiosName : BiosNameType; {absolute $FB00 : $0000;}          {!!.20}
   NextChar : Byte;
+  OwnBuf : Pointer;           {private screen when there is no console}
+  ConsoleOK : Boolean;        {Video unit is active}
+  KbdOK : Boolean;            {Keyboard unit is active}
+  Dirty : Boolean;            {screen/cursor changed since last flush}
+  Finished : Boolean;         {DoneCrt has run}
+  PhysW, PhysH : Word;        {size of the physical screen}
+  CurX, CurY : Word;          {absolute 0-based cursor position}
+  CursorSL : Word;            {emulated cursor scan lines (start shl 8 + end)}
+  KeyQ : array[0..KeyQSize-1] of Word;
+  KeyQHead, KeyQCount : Integer;
+  PageStore : array[0..MaxPages-1] of Pointer;
+  VisiblePage, ActivePageNo : Byte;
+  EofCount : Integer;
+  {$IFDEF WINDOWS}
+  SavedOutCP, SavedInCP : LongWord;
+  CPSaved : Boolean;
+  {$ENDIF}
 
-  {$L OPCRT.OBJ}
-  {$L OPCRT2.OBJ}
-  {$L OPFAST.OBJ}
-  {$L OPFAST2.OBJ}
-  {$L OPCMISC.OBJ}
-  {$L OPFLEX.OBJ}
+{$IFDEF WINDOWS}
+function GetStdHandle(nStdHandle : LongWord) : PtrUInt;
+  stdcall; external 'kernel32' name 'GetStdHandle';
+function GetConsoleMode(H : PtrUInt; var Mode : LongWord) : LongInt;
+  stdcall; external 'kernel32' name 'GetConsoleMode';
+function GetConsoleOutputCP : LongWord;
+  stdcall; external 'kernel32' name 'GetConsoleOutputCP';
+function SetConsoleOutputCP(CP : LongWord) : LongInt;
+  stdcall; external 'kernel32' name 'SetConsoleOutputCP';
+function GetConsoleCP : LongWord;
+  stdcall; external 'kernel32' name 'GetConsoleCP';
+function SetConsoleCP(CP : LongWord) : LongInt;
+  stdcall; external 'kernel32' name 'SetConsoleCP';
+function WinBeep(Freq, Dur : LongWord) : LongInt;
+  stdcall; external 'kernel32' name 'Beep';
+{$ENDIF}
 
-  {local routines in OPCRT.OBJ}
-  procedure ReadCursorPrim; external;
-  procedure SetCursorPrim; external;
-  procedure GetCursorPrim; external;
-  procedure GetCrtModePrim; external;
-  procedure ScrollUpPrim; external;
-  procedure ScrollDownPrim; external;
-  procedure AdapterCheck; external;
-  procedure DelayMS; external;
-  procedure GetCharAttr; external;
-  procedure SetWindowPrim; external;
-  procedure FullWindow; external;
-  procedure GetAttribute; external;
-  procedure InitCrt; external;
-  procedure CalcOffset; external;
-
-  {global routines in OPCRT.OBJ}
-  function ReadKeyWord : Word; external;
-  function KeyPressed : Boolean; external;
-  function ReadKey : Char; external;
-  procedure AssignCrt(var F : Text); external;
-  procedure ReInitCrt; external;
-  procedure DelayCalibrate; external;
-
-  {routines in OPCRT2.OBJ}
-  procedure TextMode(Mode : Word); external;
-  procedure Window(XLow, YLow, XHigh, YHigh : Byte); external;
-  procedure ClrScr; external;
-  procedure GoToXY(X, Y : Byte); external;
-  function WhereX : Byte; external;
-  function WhereY : Byte; external;
-  procedure TextColor(Color : Byte); external;
-  procedure TextBackground(Color : Byte); external;
-  procedure LowVideo; external;
-  procedure HighVideo; external;
-  procedure NormVideo; external;
-  procedure Delay(MS : Word); external;
-  function GetCrtMode : Byte; external;
-  procedure GotoXYAbs(X, Y : Byte); external;
-  function Font8x8Selected : Boolean; external;
-  procedure SelectFont8x8(On : Boolean); external;
-
-  {routines in OPCMISC.OBJ}
-  procedure ClrEol; external;
-  procedure InsLine; external;
-  procedure DelLine; external;
-  procedure Sound(Hz : Word); external;
-  procedure NoSound; external;
-  function WhereXY : Word; external;
-  function WhereXAbs : Byte; external;
-  function WhereYAbs : Byte; external;
-  function ReadCharAtCursor : Char; external;
-  function ReadAttrAtCursor : Byte; external;
-  procedure SetVisiblePage(PageNum : Byte); external;
-  procedure ScrollWindowUp(XLo, YLo, XHi, YHi, Lines : Byte); external;
-  procedure ScrollWindowDown(XLo, YLo, XHi, YHi, Lines : Byte); external;
-  function CursorTypeSL : Word; external;
-  function CursorStartLine : Byte; external;
-  function CursorEndLine : Byte; external;
-  procedure SetCursorSize(Startline, EndLine : Byte); external;
-  function KbdFlags : Byte; external;
-  function CheckKbd(var KeyCode : Word) : Boolean; external;
-
-  {routines in OPFAST.OBJ}
-  procedure FastWrite(St : string; Row, Col : Word; Attr : Byte); external;
-  procedure FastFill(Number : Word; Ch : Char; Row, Col : Word; Attr : Byte); external;
-  procedure FastFillVert(Number : Word; Ch : Char; Row, Col : Word; Attr : Byte); external; {!!.03}
-  procedure FastVert(St : string; Row, Col : Word; Attr : Byte); external;
-  procedure ChangeAttribute(Number : Word; Row, Col : Word; Attr : Byte); external;
-  procedure MoveScreen(var Source, Dest; Length : Word); external;
-
-  {routines in OPFAST2.OBJ}
-  procedure FastText(St : string; Row, Col : Word); external;
-  procedure WriteAttribute(St : String; Row, Col : Word); external;
-  procedure FastRead(Number : Byte; Row, Col : Word; var St : string); external;
-  procedure ReadAttribute(Number : Byte; Row, Col : Word; var St : string); external;
-  procedure FastCenter(St : string; Row, Attr : Byte); external;
-  procedure FastFlush(St : string; Row, Attr : Byte); external;
-
-  {routines in OPFLEX.OBJ}
-  procedure FlexWrite(St : string; Row, Col : Word; var FAttrs : FlexAttrs); external;
-  function FlexLen(S : string) : Byte; external;
-  procedure FastWriteCtrl(St : String; Row, Col : Word; Attr, Ctrl : Byte); external;
-  procedure FastWriteAttr(St : String; Row, Col : Word; AttrSt : String); external;
-
-  {$I OPCRT.IN1}    {Hercules stuff, alternate video page routines}
-
-  procedure InitMemorySegments;                               {!!.20 - new}
-    {-initialize important vars from segment/selector data}
+  function StdIsConsole(StdOut : Boolean) : Boolean;
+    {-True if stdin/stdout is attached to a real console/terminal}
+  {$IFDEF WINDOWS}
+  var
+    H : PtrUInt;
+    M : LongWord;
   begin
-    BiosScanLines := Ptr(BiosDataSele, $60);
-    Move(Ptr(BiosSele, $FFEA)^, CompaqBiosName, SizeOf(BiosNameType));
-    Move(Ptr(BiosSele, $B000)^, ZenithBiosName, SizeOf(BiosNameType));
+    if StdOut then
+      H := GetStdHandle($FFFFFFF5)   {STD_OUTPUT_HANDLE = -11}
+    else
+      H := GetStdHandle($FFFFFFF6);  {STD_INPUT_HANDLE = -10}
+    StdIsConsole := (H <> 0) and (H <> High(PtrUInt)) and
+                    (GetConsoleMode(H, M) <> 0);
+  end;
+  {$ELSE}
+  begin
+    if StdOut then
+      StdIsConsole := (IsATTY(1) = 1)
+    else
+      StdIsConsole := (IsATTY(0) = 1);
+  end;
+  {$ENDIF}
+
+  procedure DoBeep;
+  begin
+    {$IFDEF WINDOWS}
+    if ConsoleOK then
+      if WinBeep(800, 100) = 0 then ;
+    {$ELSE}
+    if ConsoleOK then
+      if fpWrite(1, #7, 1) < 0 then ;
+    {$ENDIF}
   end;
 
-  procedure CrtTest;
-    {-Test for presence of CRT in program}
+  {----------------------- screen change tracking -----------------------}
+
+  procedure ScreenChanged;
+    {-Note a change of the physical screen or cursor}
   begin
-    {$IFNDEF UseCrt}
-    if CrtCheck then
-      with OS(TextRec(Input).OpenFunc) do {!!.21}
-        if (S <> CSeg) and (S <> SystemSeg) then begin
-          WriteLn('CRT/OPCRT conflict');
-          Halt(1);
-        end;
-    {$ENDIF}
+    Dirty := True;
+    if ImmediateFlush then
+      FlushScreen;
+  end;
+
+  procedure VTouch;
+    {-Note a change made through VirtualBuffer}
+  begin
+    if VirtualBuffer = VideoBuffer then
+      ScreenChanged;
+  end;
+
+  procedure ApplyCursor;
+  var
+    CT : Word;
+    Lines : Integer;
+  begin
+    if (Hi(CursorSL) and $20) <> 0 then
+      CT := crHidden
+    else begin
+      Lines := Integer(Lo(CursorSL)) - Hi(CursorSL) + 1;
+      if Lines <= 2 then
+        CT := crUnderline
+      else if Lines <= 5 then
+        CT := crHalfBlock
+      else
+        CT := crBlock;
+    end;
+    Video.SetCursorType(CT);
+    Video.SetCursorPos(CurX, CurY);
+  end;
+
+  procedure FlushScreen;
+    {-Copy pending screen changes (and cursor state) to the real console}
+  begin
+    if not Dirty then
+      Exit;
+    Dirty := False;
+    if ConsoleOK then begin
+      Video.UpdateScreen(False);
+      ApplyCursor;
+    end;
+  end;
+
+  function CrtHasConsole : Boolean;
+  begin
+    CrtHasConsole := ConsoleOK;
+  end;
+
+  function MakeHiddenAttr(A : Byte) : Byte;
+    {-Make foreground and background colors the same}
+  begin
+    MakeHiddenAttr := (A and $F0) or ((A and $F0) shr 4);
+  end;
+
+  {$I opcrt.in1}    {Hercules stuff (stubs), alternate video page routines}
+
+  {----------------------- cursor position/shape -----------------------}
+
+  procedure SetCur(X, Y : LongInt);
+    {-Move the cursor (absolute, 0-based), clipped to the screen}
+  begin
+    if X < 0 then X := 0;
+    if Y < 0 then Y := 0;
+    if X >= PhysW then X := PhysW-1;
+    if Y >= PhysH then Y := PhysH-1;
+    CurX := X;
+    CurY := Y;
+    ScreenChanged;
+  end;
+
+  procedure GotoXYAbs(X, Y : Byte);
+    {-Move cursor to column X, row Y. No error checking done.}
+  begin
+    SetCur(LongInt(X)-1, LongInt(Y)-1);
+  end;
+
+  function WhereXY : Word;
+    {-Return absolute row and column coordinates of cursor.}
+  begin
+    WhereXY := ((CurY+1) shl 8) or (CurX+1);
+  end;
+
+  function WhereXAbs : Byte;
+  begin
+    WhereXAbs := CurX+1;
+  end;
+
+  function WhereYAbs : Byte;
+  begin
+    WhereYAbs := CurY+1;
+  end;
+
+  procedure WhereXYdirect(var X, Y : Byte);
+    {-Read the current position of the cursor directly from the CRT controller}
+  begin
+    {FPC port: no CRT controller; returns the emulated cursor position}
+    X := CurX+1;
+    Y := CurY+1;
+  end;
+
+  procedure SetCursorSize(StartLine, EndLine : Byte);
+    {-Sets the cursor's starting and ending scan lines.}
+  begin
+    CursorSL := (Word(StartLine) shl 8) or EndLine;
+    ScreenChanged;
+  end;
+
+  function CursorTypeSL : Word;
+  begin
+    CursorTypeSL := CursorSL;
+  end;
+
+  function CursorStartLine : Byte;
+  begin
+    CursorStartLine := Hi(CursorSL);
+  end;
+
+  function CursorEndLine : Byte;
+  begin
+    CursorEndLine := Lo(CursorSL);
   end;
 
   procedure NormalCursor;
@@ -862,52 +947,401 @@ var
     GotoXYAbs(Lo(XY), Hi(XY));
   end;
 
-  procedure WhereXYdirect(var X, Y : Byte);
-    {-Read the current position of the cursor directly from the CRT controller}
+  {----------------------- scrolling -----------------------}
+
+  procedure ScrollRaw(Up : Boolean; X1, Y1, X2, Y2, Lines : LongInt;
+                      Attr : Byte; Ch : Char);
+    {-Scroll a window of the physical screen (0-based coordinates). Lines = 0
+      or more than the window height clears the whole window.}
   var
-    CrtPort : Word; {absolute $40:$63;}                               {!!.20}
-    CrtWidth : Word; {absolute $40:$4A;}                              {!!.20}
-    CrtLen   : Word; {absolute $40:$4C;}                              {!!.20}
-    XP, XY : Word;
+    Cells : PCells;
+    Rows, Cols, R, C : LongInt;
+    Blank : Word;
   begin
-    CrtPort := Word(Ptr(BiosDataSele, $63)^);                         {!!.20}
-    CrtWidth := Word(Ptr(BiosDataSele, $4A)^);                        {!!.20}
-    CrtLen := Word(Ptr(BiosDataSele, $4C)^);                          {!!.20}
-    Port[CrtPort] := 14;
-    XP := Port[CrtPort+1];
-    Port[CrtPort] := 15;
-    XY := ((XP shl 8)+Port[CrtPort+1]) mod (CrtLen shr 1);
-    Y := Succ(XY div CrtWidth);
-    X := Succ(XY mod CrtWidth);
+    if X1 < 0 then X1 := 0;
+    if Y1 < 0 then Y1 := 0;
+    if X2 >= PhysW then X2 := PhysW-1;
+    if Y2 >= PhysH then Y2 := PhysH-1;
+    if (X1 > X2) or (Y1 > Y2) then
+      Exit;
+    Rows := Y2-Y1+1;
+    Cols := X2-X1+1;
+    if (Lines <= 0) or (Lines > Rows) then
+      Lines := Rows;
+    Blank := (Word(Attr) shl 8) or Ord(Ch);
+    Cells := PCells(VideoBuffer);
+    if Up then begin
+      for R := Y1 to Y2-Lines do
+        Move(Cells^[(R+Lines)*PhysW+X1], Cells^[R*PhysW+X1], Cols*2);
+      for R := Y2-Lines+1 to Y2 do
+        for C := X1 to X2 do
+          Cells^[R*PhysW+C] := Blank;
+    end
+    else begin
+      for R := Y2 downto Y1+Lines do
+        Move(Cells^[(R-Lines)*PhysW+X1], Cells^[R*PhysW+X1], Cols*2);
+      for R := Y1 to Y1+Lines-1 do
+        for C := X1 to X2 do
+          Cells^[R*PhysW+C] := Blank;
+    end;
+    ScreenChanged;
+  end;
+
+  procedure ScrollUpPrim(X1, Y1, X2, Y2, Lines : LongInt; Attr : Byte);
+  begin
+    ScrollRaw(True, X1, Y1, X2, Y2, Lines, Attr, TextChar);
+    TextChar := ' ';
+  end;
+
+  procedure ScrollDownPrim(X1, Y1, X2, Y2, Lines : LongInt; Attr : Byte);
+  begin
+    ScrollRaw(False, X1, Y1, X2, Y2, Lines, Attr, TextChar);
+    TextChar := ' ';
+  end;
+
+  procedure ScrollWindowUp(XLo, YLo, XHi, YHi, Lines : Byte);
+    {-Scrolls the designated window up the specified number of lines.}
+  begin
+    if YLo = YHi then
+      Lines := 0;
+    ScrollUpPrim(XLo-1, YLo-1, XHi-1, YHi-1, Lines, TextAttr);
+  end;
+
+  procedure ScrollWindowDown(XLo, YLo, XHi, YHi, Lines : Byte);
+    {-Scrolls the designated window down the specified number of lines.}
+  begin
+    if YLo = YHi then
+      Lines := 0;
+    ScrollDownPrim(XLo-1, YLo-1, XHi-1, YHi-1, Lines, TextAttr);
+  end;
+
+  procedure ClrEol;
+    {-Clear the remainder of the current screen line}
+  begin
+    ScrollUpPrim(CurX, CurY, Lo(WindMax), CurY, 0, TextAttr);
+  end;
+
+  procedure InsLine;
+    {-Insert a new line at the position of the cursor}
+  var
+    Lines : Integer;
+  begin
+    Lines := 1;
+    if CurY = Hi(WindMax) then
+      Lines := 0;
+    ScrollDownPrim(Lo(WindMin), CurY, Lo(WindMax), Hi(WindMax), Lines, TextAttr);
+  end;
+
+  procedure DelLine;
+    {-Delete current screen line}
+  var
+    Lines : Integer;
+  begin
+    Lines := 1;
+    if CurY = Hi(WindMax) then
+      Lines := 0;
+    ScrollUpPrim(Lo(WindMin), CurY, Lo(WindMax), Hi(WindMax), Lines, TextAttr);
+  end;
+
+  function ReadCharAtCursor : Char;
+    {-Returns character at the current cursor location on the selected page.}
+  begin
+    ReadCharAtCursor := Chr(PCells(VideoBuffer)^[LongInt(CurY)*PhysW+CurX] and $FF);
+  end;
+
+  function ReadAttrAtCursor : Byte;
+    {-Returns attribute at the current cursor location on the selected page.}
+  begin
+    ReadAttrAtCursor := PCells(VideoBuffer)^[LongInt(CurY)*PhysW+CurX] shr 8;
+  end;
+
+  {----------------------- windows, text attributes -----------------------}
+
+  procedure FullWindow;
+    {-Set the window to the whole screen}
+  var
+    W, H : Word;
+  begin
+    W := PhysW-1;
+    H := PhysH-1;
+    if W > 255 then W := 255;
+    if H > 255 then H := 255;
+    WindMin := 0;
+    WindMax := (H shl 8) or W;
+  end;
+
+  procedure Window(XLow, YLow, XHigh, YHigh : Byte);
+    {-Set current window coordinates}
+  begin
+    if (XLow < 1) or (YLow < 1) or (XLow > XHigh) or (YLow > YHigh) or
+       (XHigh > ScreenWidth) or (YHigh > ScreenHeight) then
+      Exit;
+    WindMin := ((YLow-1) shl 8) or (XLow-1);
+    WindMax := ((YHigh-1) shl 8) or (XHigh-1);
+    SetCur(XLow-1, YLow-1);
+  end;
+
+  procedure ClrScr;
+    {-Clear the current window}
+  begin
+    ScrollUpPrim(Lo(WindMin), Hi(WindMin), Lo(WindMax), Hi(WindMax), 0, TextAttr);
+    SetCur(Lo(WindMin), Hi(WindMin));
+  end;
+
+  procedure GoToXY(X, Y : Byte);
+    {-Move cursor to column X, row Y, relative to Window}
+  var
+    AX, AY : Integer;
+  begin
+    if (X < 1) or (Y < 1) then
+      Exit;
+    AX := X-1+Lo(WindMin);
+    AY := Y-1+Hi(WindMin);
+    if (AX > Lo(WindMax)) or (AY > Hi(WindMax)) then
+      Exit;
+    SetCur(AX, AY);
+  end;
+
+  function WhereX : Byte;
+    {-Return column coordinate of cursor, relative to Window}
+  begin
+    WhereX := Integer(CurX)-Lo(WindMin)+1;
+  end;
+
+  function WhereY : Byte;
+    {-Return row coordinate of cursor, relative to Window}
+  begin
+    WhereY := Integer(CurY)-Hi(WindMin)+1;
+  end;
+
+  procedure TextColor(Color : Byte);
+    {-Set foreground color for screen writes}
+  begin
+    if (Color and $F0) <> 0 then
+      Color := (Color and $0F) or Blink;
+    TextAttr := (TextAttr and $70) or Color;
+  end;
+
+  procedure TextBackground(Color : Byte);
+    {-Set background color for screen writes}
+  begin
+    TextAttr := (TextAttr and $8F) or ((Color and $07) shl 4);
+  end;
+
+  procedure LowVideo;
+    {-Select low intensity}
+  begin
+    TextAttr := TextAttr and $77;
+  end;
+
+  procedure HighVideo;
+    {-Select high intensity}
+  begin
+    TextAttr := TextAttr or $08;
+  end;
+
+  procedure NormVideo;
+    {-Select video attribute used at start of program}
+  begin
+    TextAttr := NormalAttr;
+  end;
+
+  {----------------------- keyboard -----------------------}
+
+  function EvToWord(Ev : TKeyEvent) : Word;
+    {-Convert a Keyboard unit event to the DOS key word (scan shl 8 + char).
+      Returns 0 for events that are not keystrokes (key release, shift only).}
+  var
+    Fl : Byte;
+    W : Word;
+  begin
+    EvToWord := 0;
+    Fl := (Ev shr 24) and $FF;
+    if (Fl and kbReleased) <> 0 then
+      Exit;
+    W := Ev and $FFFF;
+    case Fl and $03 of
+      kbPhys :
+        EvToWord := W;     {FPC delivers (scancode shl 8) or ascii already}
+      kbASCII, kbUniCode :
+        if W < 256 then
+          EvToWord := W;   {no scan code known}
+      kbFnKey :
+        case W of
+          kbdF1..kbdF10 : EvToWord := (Word($3B) + (W-kbdF1)) shl 8;
+          kbdF11        : EvToWord := $8500;
+          kbdF12        : EvToWord := $8600;
+          kbdHome       : EvToWord := $4700;
+          kbdUp         : EvToWord := $4800;
+          kbdPgUp       : EvToWord := $4900;
+          kbdLeft       : EvToWord := $4B00;
+          kbdRight      : EvToWord := $4D00;
+          kbdEnd        : EvToWord := $4F00;
+          kbdDown       : EvToWord := $5000;
+          kbdPgDn       : EvToWord := $5100;
+          kbdInsert     : EvToWord := $5200;
+          kbdDelete     : EvToWord := $5300;
+        end;
+    end;
+  end;
+
+  function PeekKey(var W : Word) : Boolean;
+    {-True (and the key word, not consumed) if a keystroke is waiting}
+  var
+    Ev : TKeyEvent;
+    X : Word;
+  begin
+    PeekKey := False;
+    if KeyQCount > 0 then begin
+      W := KeyQ[KeyQHead];
+      PeekKey := True;
+      Exit;
+    end;
+    if not KbdOK then
+      Exit;
+    repeat
+      Ev := Keyboard.PollKeyEvent;
+      if Ev = 0 then
+        Exit;
+      X := EvToWord(Ev);
+      if X <> 0 then begin
+        W := X;
+        PeekKey := True;
+        Exit;
+      end;
+      Ev := Keyboard.GetKeyEvent;   {discard non-key event}
+    until False;
+  end;
+
+  procedure DropKey;
+    {-Consume the key reported by PeekKey}
+  var
+    Ev : TKeyEvent;
+  begin
+    if KeyQCount > 0 then begin
+      KeyQHead := (KeyQHead+1) mod KeyQSize;
+      Dec(KeyQCount);
+    end
+    else if KbdOK then
+      Ev := Keyboard.GetKeyEvent;
+  end;
+
+  function NativeReadKeyWord : Word;
+    {-Native blocking read, bypassing the key hook}
+  var
+    W : Word;
+    Ev : TKeyEvent;
+    B : Byte;
+  begin
+    FlushScreen;
+    repeat
+      if KeyQCount > 0 then begin
+        NativeReadKeyWord := KeyQ[KeyQHead];
+        DropKey;
+        Exit;
+      end;
+      if KbdOK then begin
+        Ev := Keyboard.GetKeyEvent;
+        W := EvToWord(Ev);
+        if W <> 0 then begin
+          NativeReadKeyWord := W;
+          Exit;
+        end;
+      end
+      else begin
+        {FPC port: no console keyboard; read bytes from redirected stdin.
+         At end of input return Esc, and stop the program if that goes on.}
+        if SysUtils.FileRead(0, B, 1) <= 0 then begin
+          Inc(EofCount);
+          if EofCount > 1000 then
+            Halt(1);
+          NativeReadKeyWord := $011B;
+        end
+        else
+          NativeReadKeyWord := B;
+        Exit;
+      end;
+    until False;
+  end;
+
+  function NativeCheckKbd(var KeyCode : Word) : Boolean;
+    {-Native peek, bypassing the key hook}
+  begin
+    FlushScreen;
+    if (not KbdOK) and (KeyQCount = 0) then begin
+      {no console keyboard: report a key so that polling loops end}
+      KeyCode := $011B;
+      NativeCheckKbd := True;
+    end
+    else
+      NativeCheckKbd := PeekKey(KeyCode);
+  end;
+
+  function ReadKeyWord : Word;
+     {-Waits for keypress, then returns scan and character codes together}
+  var
+    K : Word;
+  begin
+    if @KeyHook <> nil then begin
+      KeyHook(False, K);
+      ReadKeyWord := K;
+    end
+    else
+      ReadKeyWord := NativeReadKeyWord;
+  end;
+
+  function CheckKbd(var KeyCode : Word) : Boolean;
+     {-Returns True (and the key codes) if a keystroke is waiting}
+  begin
+    if @KeyHook <> nil then
+      CheckKbd := KeyHook(True, KeyCode)
+    else
+      CheckKbd := NativeCheckKbd(KeyCode);
+  end;
+
+  function KeyPressed : Boolean;
+    {-Return true if a key has been pressed}
+  var
+    W : Word;
+  begin
+    if NextChar <> 0 then
+      KeyPressed := True
+    else
+      KeyPressed := CheckKbd(W);
+  end;
+
+  function KbdFlags : Byte;
+    {-Returns keyboard status flags as a bit-coded byte}
+  var
+    S, F : Byte;
+  begin
+    F := 0;
+    if KbdOK then begin
+      S := Keyboard.GetKeyEventShiftState(Keyboard.PollShiftStateEvent);
+      {Keyboard reports no left/right distinction on every platform}
+      if (S and kbRightShift) <> 0 then F := F or $01;
+      if (S and kbLeftShift) <> 0 then F := F or $02;
+      if (S and kbCtrl) <> 0 then F := F or $04;
+      if (S and kbAlt) <> 0 then F := F or $08;
+    end;
+    {FPC port: Caps/Num/Scroll lock and Insert states are not available}
+    KbdFlags := F;
   end;
 
   function EnhancedKbdInstalled : Boolean;
     {-Returns True if an enhanced keyboard is installed}
   begin
-    EnhancedKbdInstalled := (Byte(Ptr(BiosDataSele, $96)^) and $10 <> 0); {!!.20}
+    EnhancedKbdInstalled := True;
   end;
 
   procedure StuffKey(W : Word);
     {-Stuff one key into the keyboard buffer}
-  const
-    KbdStart = $1E;
-    KbdEnd = $3C;
-  var
-    KbdHead : ^Word;{absolute $40 : $1A;}                             {!!.20}
-    KbdTail : ^Word;{absolute $40 : $1C;}                             {!!.20}
-    SaveKbdTail : Word;
   begin
-    KbdHead := Ptr(BiosDataSele, $1A);                                {!!.20}
-    KbdTail := Ptr(BiosDataSele, $1C);                                {!!.20}
-    SaveKbdTail := KbdTail^;                                          {!!.20}
-    if KbdTail^ = KbdEnd then                                         {!!.20}
-      KbdTail^ := KbdStart                                            {!!.20}
-    else
-      Inc(KbdTail^, 2);                                               {!!.20}
-    if KbdTail^ = KbdHead^ then                                       {!!.20}
-      KbdTail^ := SaveKbdTail                                         {!!.20}
-    else
-      Word(Ptr(BiosDataSele, SaveKbdTail)^) := W;                     {!!.20}
+    {FPC port: private queue consulted before the real keyboard}
+    if KeyQCount < KeyQSize then begin
+      KeyQ[(KeyQHead+KeyQCount) mod KeyQSize] := W;
+      Inc(KeyQCount);
+    end;
   end;
 
   procedure StuffString(S : string);
@@ -924,15 +1358,572 @@ var
       StuffKey(Ord(S[I]));
   end;
 
+  procedure BreakCheck;
+    {-Halt if Ctrl-Break was pressed}
+  var
+    W : Word;
+  begin
+    if CtrlBreakFlag then begin
+      CtrlBreakFlag := False;
+      while PeekKey(W) do
+        DropKey;
+      {FPC port: the Keyboard unit never reports Ctrl-Break, so this is only
+       reachable if some other code sets CtrlBreakFlag}
+      FlushScreen;
+      Halt(255);
+    end;
+  end;
+
+  function ReadKey : Char;
+    {-Read a character from the keyboard}
+  var
+    W : Word;
+  begin
+    if NextChar <> 0 then begin
+      ReadKey := Chr(NextChar);
+      NextChar := 0;
+      Exit;
+    end;
+    W := ReadKeyWord;
+    if Lo(W) = 0 then begin
+      if Hi(W) = 0 then
+        ReadKey := ^C
+      else begin
+        NextChar := Hi(W);
+        ReadKey := #0;
+      end;
+    end
+    else
+      ReadKey := Chr(Lo(W));
+    BreakCheck;
+  end;
+
+  {----------------------- text file driver -----------------------}
+
+  procedure WriteChar(C : Char);
+    {-Write a character at the cursor, interpreting CR, LF, BS and bell}
+  var
+    Cells : PCells;
+    L, R, B : Integer;
+  begin
+    L := Lo(WindMin);
+    R := Lo(WindMax);
+    B := Hi(WindMax);
+    case C of
+      #7  : DoBeep;
+      #8  : if CurX > L then Dec(CurX);
+      #10 : Inc(CurY);
+      #13 : CurX := L;
+      else begin
+        Cells := PCells(VideoBuffer);
+        if (CurX < PhysW) and (CurY < PhysH) then
+          Cells^[LongInt(CurY)*PhysW+CurX] := (Word(TextAttr) shl 8) or Ord(C);
+        Inc(CurX);
+        if CurX > R then begin
+          CurX := L;
+          Inc(CurY);
+        end;
+      end;
+    end;
+    if CurY > B then begin
+      CurY := B;
+      ScrollRaw(True, L, Hi(WindMin), R, B, 1, TextAttr, ' ');
+    end;
+    ScreenChanged;
+  end;
+
+  function CrtWrite(var F : TextRec) : Longint;
+  var
+    I : LongInt;
+  begin
+    for I := 0 to F.BufPos-1 do
+      WriteChar(F.BufPtr^[I]);
+    F.BufPos := 0;
+    TextChar := ' ';
+    BreakCheck;
+    FlushScreen;
+    CrtWrite := 0;
+  end;
+
+  function CrtRead(var F : TextRec) : Longint;
+  var
+    Pos, Max : LongInt;
+    C : Char;
+    Done : Boolean;
+
+    procedure Erase1;
+    begin
+      Dec(Pos);
+      WriteChar(#8);
+      WriteChar(' ');
+      WriteChar(#8);
+    end;
+
+  begin
+    Max := F.BufSize-2;
+    if Max > BufLen then
+      Max := BufLen;
+    Pos := 0;
+    Done := False;
+    repeat
+      NextChar := 0;
+      C := ReadKey;
+      case C of
+        #0 : ;                        {extended key: ignored}
+        #8, ^S :
+          if Pos > 0 then
+            Erase1;
+        #27, ^A, #127 :
+          while Pos > 0 do
+            Erase1;
+        #13 :
+          begin
+            F.BufPtr^[Pos] := #13;
+            F.BufPtr^[Pos+1] := #10;
+            Inc(Pos, 2);
+            WriteChar(#13);
+            WriteChar(#10);
+            Done := True;
+          end;
+        #26 :
+          if CheckEOF then begin
+            Pos := 0;
+            Done := True;
+          end;
+        ' '..#126, #128..#255 :
+          if Pos < Max then begin
+            F.BufPtr^[Pos] := C;
+            Inc(Pos);
+            WriteChar(C);
+          end;
+      end;
+      FlushScreen;
+    until Done;
+    F.BufPos := 0;
+    F.BufEnd := Pos;
+    CrtRead := 0;
+  end;
+
+  function CrtClose(var F : TextRec) : Longint;
+  begin
+    CrtClose := 0;
+  end;
+
+  function CrtOpen(var F : TextRec) : Longint;
+  begin
+    if F.Mode = fmInput then begin
+      F.InOutFunc := @CrtRead;
+      F.FlushFunc := nil;
+    end
+    else begin
+      F.Mode := fmOutput;
+      F.InOutFunc := @CrtWrite;
+      F.FlushFunc := @CrtWrite;
+    end;
+    F.CloseFunc := @CrtClose;
+    CrtOpen := 0;
+  end;
+
+  procedure AssignCrt(var F : Text);
+    {-Routes input and output through our routines}
+  begin
+    Assign(F, '');
+    TextRec(F).OpenFunc := @CrtOpen;
+    BufLen := 126;
+  end;
+
+  {----------------------- mode / adapter -----------------------}
+
+  procedure GetCrtModePrim;
+    {-Refresh mode-dependent variables}
+  begin
+    if not (Lo(LastMode) in [BW40, CO40, BW80, CO80, Mono]) then
+      LastMode := CO80;
+    ScreenWidth := PhysW;
+    ScreenHeight := PhysH;
+    VirtualWidth := PhysW;
+    VirtualHeight := PhysH;
+    CurrentHeight := PhysH-1;
+    CurrentPage := VisiblePage;
+    ActivePageNo := VisiblePage;
+    InTextMode := True;
+    if CurrentMode = Mono then
+      VideoSegment := $B000
+    else
+      VideoSegment := $B800;
+    VirtualSegment := VideoSegment;
+    VirtualBuffer := VideoBuffer;
+    MultiTaskingOn := False;
+  end;
+
+  procedure AdapterCheck;
+    {-Set display type variables}
+  begin
+    {FPC port: no adapter detection; report a VGA unless overridden}
+    LastMode := Lo(LastMode);
+    CurrentDisplay := VGA;
+    EnhancedDisplay := VGA;
+    if DisplayOverride >= 0 then begin
+      if DisplayOverride > Ord(PGC) then
+        CurrentDisplay := VGA
+      else
+        CurrentDisplay := DisplayType(DisplayOverride);
+      if CurrentDisplay < MCGA then begin
+        if CurrentMode = Mono then
+          CurrentDisplay := MonoHerc
+        else
+          CurrentDisplay := CGA;
+        EnhancedDisplay := MonoHerc;
+      end
+      else
+        EnhancedDisplay := CurrentDisplay;
+    end;
+    if (PhysH > 25) and (PhysW <= 80) then
+      LastMode := LastMode or Font8x8;
+  end;
+
+  function GetCrtMode : Byte;
+    {-Get the current video mode. Also reinitializes internal variables.}
+  begin
+    GetCrtModePrim;
+    GetCrtMode := CurrentMode;
+  end;
+
+  procedure ReInitCrt;
+    {-Reinitialize CRT unit's internal variables.}
+  begin
+    GetCrtModePrim;
+    AdapterCheck;
+    WhichHerc := WhichHercCard;
+    CheckSnow := False;
+    FullWindow;
+  end;
+
+  procedure TextMode(Mode : Word);
+    {-Switch to/set text mode}
+  begin
+    {FPC port: the real console mode cannot be switched. The mode number and
+     8x8 flag are recorded and the screen is cleared, but the screen size
+     stays that of the console.}
+    if Lo(Mode) in [BW40, CO40, BW80, CO80, Mono] then
+      LastMode := Lo(Mode)
+    else
+      LastMode := CO80;
+    ReInitCrt;
+    if (Mode and Font8x8) <> 0 then
+      SelectFont8x8(True);
+    TextAttr := $07;
+    NormalAttr := $07;
+    TextChar := ' ';
+    ScrollRaw(True, 0, 0, PhysW-1, PhysH-1, 0, TextAttr, ' ');
+    NormalCursor;
+    SetCur(0, 0);
+  end;
+
+  function Font8x8Selected : Boolean;
+    {-Return True if EGA or VGA is active and in 8x8 font}
+  begin
+    Font8x8Selected := (LastMode and Font8x8) <> 0;
+  end;
+
+  procedure SelectFont8x8(On : Boolean);
+    {-Toggle 8x8 font on or off}
+  begin
+    {FPC port: stubbed because the font cannot be changed; only the flag
+     that selects the cursor scan lines is kept}
+    if On then
+      LastMode := LastMode or Font8x8
+    else
+      LastMode := LastMode and not Font8x8;
+  end;
+
+  procedure SetBlink(On : Boolean);
+    {-Enable text mode attribute blinking if On is True}
+  begin
+    {FPC port: stubbed because the console decides how attribute bit 7 is
+     shown (blink or intense background)}
+  end;
+
+  procedure SetCrtBorder(Attr : Byte);
+    {-Set border to background color if card type and mode allow}
+  begin
+    {FPC port: stubbed because there is no border}
+  end;
+
+  procedure Sound(Hz : Word);
+    {-Turn on the sound at the designated frequency}
+  begin
+    {FPC port: stubbed because there is no portable speaker access}
+  end;
+
+  procedure NoSound;
+    {-Turn off the sound}
+  begin
+    {FPC port: stubbed because there is no portable speaker access}
+  end;
+
+  procedure Delay(MS : Word);
+    {-Delay for MS milliseconds}
+  begin
+    FlushScreen;
+    if MS > 0 then
+      SysUtils.Sleep(MS);
+  end;
+
+  procedure DelayCalibrate;
+    {-Perform delay calibration}
+  begin
+    {FPC port: Delay uses the OS timer; OneMS is only a nominal value}
+    OneMS := 1000;
+  end;
+
+  {----------------------- fast screen writing -----------------------}
+
+  function Lim : LongInt;
+    {-Number of cells that may be written through VirtualBuffer}
+  begin
+    if VirtualBuffer = VideoBuffer then
+      Lim := LongInt(PhysW) * PhysH
+    else
+      Lim := $1000000;
+  end;
+
+  function Idx0(Row, Col : Word) : LongInt;
+  begin
+    Idx0 := (LongInt(Row)-1) * VirtualWidth + Col - 1;
+  end;
+
+  procedure PutCell(I : LongInt; W : Word);
+  begin
+    if (I >= 0) and (I < Lim) then
+      PCells(VirtualBuffer)^[I] := W;
+  end;
+
+  function GetCell(I : LongInt) : Word;
+  begin
+    if (I >= 0) and (I < Lim) then
+      GetCell := PCells(VirtualBuffer)^[I]
+    else
+      GetCell := $0720;
+  end;
+
+  procedure FastWrite(St : string; Row, Col : Word; Attr : Byte);
+    {-Write St at Row,Col in Attr (video attribute) without snow}
+  var
+    I, J : LongInt;
+  begin
+    I := Idx0(Row, Col);
+    for J := 1 to Length(St) do
+      PutCell(I+J-1, (Word(Attr) shl 8) or Ord(St[J]));
+    VTouch;
+  end;
+
+  procedure FastText(St : string; Row, Col : Word);
+    {-Write St at Row,Col without changing the underlying video attribute.}
+  var
+    I, J : LongInt;
+  begin
+    I := Idx0(Row, Col);
+    for J := 1 to Length(St) do
+      PutCell(I+J-1, (GetCell(I+J-1) and $FF00) or Ord(St[J]));
+    VTouch;
+  end;
+
+  procedure WriteAttribute(St : String; Row, Col : Word);
+    {-Write string of attributes St at Row,Col without changing characters}
+  var
+    I, J : LongInt;
+  begin
+    I := Idx0(Row, Col);
+    for J := 1 to Length(St) do
+      PutCell(I+J-1, (GetCell(I+J-1) and $00FF) or (Word(Ord(St[J])) shl 8));
+    VTouch;
+  end;
+
+  procedure FastVert(St : string; Row, Col : Word; Attr : Byte);
+    {-Write St vertically at Row,Col in Attr (video attribute)}
+  var
+    I, J : LongInt;
+  begin
+    I := Idx0(Row, Col);
+    for J := 1 to Length(St) do
+      PutCell(I+(J-1)*VirtualWidth, (Word(Attr) shl 8) or Ord(St[J]));
+    VTouch;
+  end;
+
+  procedure FastFill(Number : Word; Ch : Char; Row, Col : Word; Attr : Byte);
+    {-Fill Number chs at Row,Col in Attr (video attribute) without snow}
+  var
+    I, J : LongInt;
+  begin
+    I := Idx0(Row, Col);
+    for J := 0 to LongInt(Number)-1 do
+      PutCell(I+J, (Word(Attr) shl 8) or Ord(Ch));
+    VTouch;
+  end;
+
+  procedure FastFillVert(Number : Word; Ch : Char; Row, Col : Word; Attr : Byte);
+    {-Fill Number chs vertically at Row,Col in Attr (video attribute)}
+  var
+    I, J : LongInt;
+  begin
+    I := Idx0(Row, Col);
+    for J := 0 to LongInt(Number)-1 do
+      PutCell(I+J*VirtualWidth, (Word(Attr) shl 8) or Ord(Ch));
+    VTouch;
+  end;
+
+  procedure ChangeAttribute(Number : Word; Row, Col : Word; Attr : Byte);
+    {-Change Number video attributes to Attr starting at Row,Col}
+  var
+    I, J : LongInt;
+  begin
+    I := Idx0(Row, Col);
+    for J := 0 to LongInt(Number)-1 do
+      PutCell(I+J, (GetCell(I+J) and $00FF) or (Word(Attr) shl 8));
+    VTouch;
+  end;
+
+  procedure FastCenter(St : string; Row, Attr : Byte);
+    {-Write St centered on window Row in Attr (video attribute) without snow}
+  var
+    Col : Integer;
+  begin
+    Col := ((Integer(Lo(WindMin)) + Lo(WindMax) + 1) shr 1) - (Length(St) shr 1) + 1;
+    FastWrite(St, Word(Row) + Hi(WindMin), Word(Col), Attr);
+  end;
+
+  procedure FastFlush(St : string; Row, Attr : Byte);
+    {-Write St flush right on window Row in Attr (video attribute) without snow}
+  var
+    Col : Integer;
+  begin
+    Col := Integer(Lo(WindMax)) + 1 - Length(St) + 1;
+    FastWrite(St, Word(Row) + Hi(WindMin), Word(Col), Attr);
+  end;
+
+  procedure FastRead(Number : Byte; Row, Col : Word; var St : string);
+    {-Read Number characters from the screen into St starting at Row,Col}
+  var
+    I, J : LongInt;
+  begin
+    I := Idx0(Row, Col);
+    St[0] := Chr(Number);
+    for J := 1 to Number do
+      St[J] := Chr(GetCell(I+J-1) and $FF);
+  end;
+
+  procedure ReadAttribute(Number : Byte; Row, Col : Word; var St : string);
+    {-Read Number attributes from the screen into St starting at Row,Col}
+  var
+    I, J : LongInt;
+  begin
+    I := Idx0(Row, Col);
+    St[0] := Chr(Number);
+    for J := 1 to Number do
+      St[J] := Chr(GetCell(I+J-1) shr 8);
+  end;
+
+  procedure MoveScreen(var Source, Dest; Length : Word);
+    {-Move Length words from Source to Dest without snow}
+  var
+    D : PtrUInt;
+  begin
+    if Length = 0 then
+      Exit;
+    Move(Source, Dest, LongInt(Length) * 2);
+    D := PtrUInt(@Dest);
+    if (D >= PtrUInt(VideoBuffer)) and
+       (D < PtrUInt(VideoBuffer) + PtrUInt(PageBytes)) then
+      ScreenChanged;
+  end;
+
+  procedure FastWriteAttr(St : String; Row, Col : Word; AttrSt : String);
+    {-Write St at Row,Col using attributes in AttrSt}
+  var
+    I, J : LongInt;
+    A : Byte;
+  begin
+    I := Idx0(Row, Col);
+    A := $07;
+    for J := 1 to Length(St) do begin
+      if J <= Length(AttrSt) then
+        A := Ord(AttrSt[J]);
+      PutCell(I+J-1, (Word(A) shl 8) or Ord(St[J]));
+    end;
+    VTouch;
+  end;
+
+  procedure FlexWrite(St : string; Row, Col : Word; var FAttrs : FlexAttrs);
+    {-Write St at Row,Col with flexible color handling}
+  var
+    I, J, N : LongInt;
+    C : Byte;
+    ChStack : array[0..255] of Byte;
+    AtStack : array[0..255] of Byte;
+    Sp : Integer;
+  begin
+    I := Idx0(Row, Col);
+    Sp := 0;
+    ChStack[0] := 0;
+    AtStack[0] := FAttrs[0];
+    N := 0;
+    for J := 1 to Length(St) do begin
+      C := Ord(St[J]);
+      if (C >= 1) and (C <= 3) then begin
+        {^A..^C toggle an attribute; repeating the active one pops it}
+        if (ChStack[Sp] = C) and (Sp > 0) then
+          Dec(Sp)
+        else begin
+          Inc(Sp);
+          ChStack[Sp] := C;
+          AtStack[Sp] := FAttrs[C];
+        end;
+      end
+      else begin
+        PutCell(I+N, (Word(AtStack[Sp]) shl 8) or C);
+        Inc(N);
+      end;
+    end;
+    VTouch;
+  end;
+
+  function FlexLen(S : string) : Byte;
+    {-Return actual (visible) length of a flex string}
+  var
+    J, N : Integer;
+  begin
+    N := 0;
+    for J := 1 to Length(S) do
+      if (S[J] = #0) or (S[J] > #3) then
+        Inc(N);
+    FlexLen := N;
+  end;
+
+  procedure FastWriteCtrl(St : String; Row, Col : Word; Attr, Ctrl : Byte);
+    {-Write St at Row,Col in Attr (video attribute) without snow.
+      Control characters displayed in Ctrl as upper-case letters}
+  var
+    I, J : LongInt;
+  begin
+    I := Idx0(Row, Col);
+    for J := 1 to Length(St) do
+      if St[J] < ' ' then
+        PutCell(I+J-1, (Word(Ctrl) shl 8) or (Ord(St[J]) + 64))
+      else
+        PutCell(I+J-1, (Word(Attr) shl 8) or Ord(St[J]));
+    VTouch;
+  end;
+
   function SaveWindow(XLow, YLow, XHigh, YHigh : Byte; Allocate : Boolean;
                       var Covers : Pointer) : Boolean;
     {-Allocate buffer space if requested and save window contents}
   var
     CoversP : BufPtr absolute Covers;
     WordsPerRow : Word;
-    BufBytes : Word;
-    SrcPos : Word;
-    DestPos : Word;
+    BufBytes : LongInt;
+    SrcPos : LongInt;
+    DestPos : LongInt;
     Row : Word;
   begin
     {assume success}
@@ -943,25 +1934,20 @@ var
 
     if Allocate then begin
       {compute bytes needed for screen buffer}
-      BufBytes := (WordsPerRow*Succ(YHigh-YLow)) shl 1;
+      BufBytes := (LongInt(WordsPerRow)*Succ(YHigh-YLow)) shl 1;
 
       {make sure enough memory is available}
-      if MaxAvail < LongInt(BufBytes) then begin
-        SaveWindow := False;
-        Exit;
-      end
-      else
-        {allocate the screen buffer}
-        GetMem(CoversP, BufBytes);
+      GetMem(CoversP, BufBytes);
     end;
 
     {save current contents to the screen buffer}
     DestPos := 0;
-    SrcPos := (Pred(YLow)*VirtualWidth+Pred(XLow)) shl 1;
+    SrcPos := (Pred(YLow)*LongInt(VirtualWidth)+Pred(XLow)) shl 1;
     for Row := YLow to YHigh do begin
-      MoveScreen(Mem[VirtualSegment:SrcPos], CoversP^[DestPos], WordsPerRow);
-      Inc(SrcPos, VirtualWidth shl 1);
-      Inc(DestPos, WordsPerRow shl 1);
+      MoveScreen(PByte(PtrUInt(VirtualBuffer)+SrcPos)^, CoversP^[DestPos],
+                 WordsPerRow);
+      Inc(SrcPos, LongInt(VirtualWidth) shl 1);
+      Inc(DestPos, LongInt(WordsPerRow) shl 1);
     end;
   end;
 
@@ -971,8 +1957,8 @@ var
   var
     CoversP : BufPtr absolute Covers;
     WordsPerRow : Word;
-    SrcPos : Word;
-    DestPos : Word;
+    SrcPos : LongInt;
+    DestPos : LongInt;
     Row : Word;
   begin
     {compute number of words to move per row}
@@ -980,16 +1966,18 @@ var
 
     {Restore current contents to the screen buffer}
     DestPos := 0;
-    SrcPos := (Pred(YLow)*VirtualWidth+Pred(XLow)) shl 1;
+    SrcPos := (Pred(YLow)*LongInt(VirtualWidth)+Pred(XLow)) shl 1;
     for Row := YLow to YHigh do begin
-      MoveScreen(CoversP^[DestPos], Mem[VirtualSegment:SrcPos], WordsPerRow);
-      Inc(SrcPos, VirtualWidth shl 1);
-      Inc(DestPos, WordsPerRow shl 1);
+      MoveScreen(CoversP^[DestPos], PByte(PtrUInt(VirtualBuffer)+SrcPos)^,
+                 WordsPerRow);
+      Inc(SrcPos, LongInt(VirtualWidth) shl 1);
+      Inc(DestPos, LongInt(WordsPerRow) shl 1);
     end;
+    VTouch;
 
     {deallocate buffer space if requested}
     if Deallocate then begin
-      FreeMem(CoversP, (WordsPerRow*Succ(YHigh-YLow)) shl 1);
+      FreeMem(CoversP, (LongInt(WordsPerRow)*Succ(YHigh-YLow)) shl 1);
       CoversP := nil;
     end;
   end;
@@ -1042,94 +2030,6 @@ var
     if Width > 0 then      {!!.03}
       FastFill(Width, FrameChars[frBB], BotRow, LeftCol+1, FAttr);
     FastFill(1,     FrameChars[frBR], BotRow, RightCol, FAttr);
-  end;
-
-  procedure SetBlink(On : Boolean);
-    {-Enable text mode attribute blinking if On is True}
-  const
-    PortVal : array[0..4] of Byte = ($0C, $08, $0D, $09, $09);
-  var
-    PortNum : Word;
-    Index : Byte;
-    PVal : Byte;
-  begin
-    case CurrentDisplay of
-      MonoHerc :
-        begin
-          PortNum := $3B8;
-          Index := 4;
-        end;
-      CGA :
-        begin
-          PortNum := $3D8;
-          case LastMode of
-            0..3 : Index := LastMode;
-            else Exit;
-          end;
-        end;
-      MCGA..VGA :
-        begin
-          inline(
-            $8A/$5E/<On/     {mov bl,[bp+<On]}
-            $B8/$03/$10/     {mov ax,$1003}
-            $CD/$10);        {int $10}
-          Exit;
-        end;
-      else
-        Exit;
-    end;
-    PVal := PortVal[Index];
-    if On then
-      PVal := PVal or $20;
-    Port[PortNum] := PVal;
-  end;
-
-  procedure SetCrtBorder(Attr : Byte); {!!.01}
-    {-Set border to background color if card type and mode allow}
-  begin
-    inline(
-      $8A/$5E/<Attr/         {mov BL,[BP+<Attr]  ;get attribute}
-      $B1/$04/               {mov CL,4           ;shift count}
-      $D2/$EB/               {shr BL,CL          ;get background color}
-      $80/$E3/$0F/           {and BL,$0F         ;make sure it's valid}
-      $8A/$26/>CurrentMode/  {mov AH,[>CurrentMode]    ;get current mode}
-      $A0/>CurrentDisplay/   {mov AL,[>CurrentDisplay] ;get current display}
-      $3C/$01/               {cmp AL,CGA         ;check for CGA}
-      $75/$0D/               {jne ChkEga         ;nope, go check EGA}
-      $80/$FC/$03/           {cmp AH,3           ;check for modes 0-3}
-      $77/$3C/               {ja  Exit           ;forget it}
-      $B4/$0B/               {mov AH,$0B         ;set color palette}
-      $B7/$00/               {mov BH,$00         ;color palette ID}
-      $CD/$10/               {int $10            ;let BIOS do it}
-      $EB/$34/               {jmp short Exit     ;and get out}
-                             {ChkEga:}
-      $3C/$03/               {cmp AL,EGA         ;check for EGA/VGA}
-      $72/$30/               {jb  Exit           ;forget it}
-      $80/$FC/$03/           {cmp AH,3           ;check for modes 0-3}
-      $77/$2B/               {ja  Exit           ;forget it}
-                             {Check6:}
-      $80/$FB/$06/           {cmp BL,6           ;brown is a special case}
-      $75/$04/               {jne ChkEga2}
-      $B3/$14/               {mov BL,$14         ;BL = $14}
-      $EB/$1A/               {jmp short GoEga}
-                             {ChkEga2:}
-      $80/$FB/$08/           {cmp BL,$08         ;Is blink bit set?}
-      $72/$15/               {jb  GoEga}
-    {.$B8/$40/$00/}          {mov ax,$40         ;Is blinking enabled?} {!!.20}
-      $A1/>BiosDataSele/                                                {!!.20}
-      $8E/$C0/               {mov es,ax}
-      $26/$F6/$06/>$65/$20/  {test es:[>$65],$20 ;bit 5 set if blinking on}
-      $74/$05/               {jz  Intense        ;if it's on, add $30}
-      $80/$E3/$07/           {and BL,$07         ;else, clear blink bit}
-      $EB/$E0/               {jmp short Check6   ;and check for $06 again}
-                             {Intense:}
-      $80/$C3/$30/           {add BL,$30         ;select high-intensity}
-                             {GoEga:}
-      $B4/$10/               {mov AH,$10         ;set color palette}
-      $B0/$01/               {mov AL,$01         ;set border color}
-      $88/$DF/               {mov BH,BL          ;the color}
-      $CD/$10);              {int $10            ;let BIOS do it}
-                             {Exit:}
   end;
 
   function MapColor(C : Byte) : Byte;
@@ -1413,151 +2313,125 @@ var
     MouseMono := MapMono(Color, Mono);
   end;
 
-{$IFDEF UseCrt}
 
-  procedure PatchCrt;
-    {-Patch the CRT unit so that all calls are directed to us}
-  type
-    PatchRec =
-      record
-        JmpFar : Byte;
-        Addr : Pointer;
-      end;
-
-    procedure Patch(CrtAddr, OpCrtAddr : Pointer);
-      {-Patch in a long jump to OpCrtAddr at CrtAddr}
-    begin
-      {$IFDEF DPMI}                                     {!!.21}
-      {Get a writeable alias for the CRT code segment}  {!!.21}
-      inc(OS(CrtAddr).S, SelectorInc);                  {!!.21}
-      {$ENDIF}                                          {!!.21}
-      with PatchRec(CrtAddr^) do begin
-        JmpFar := $EA;
-        Addr := OpCrtAddr;
-      end;
-    end;
-
+  procedure InitCrt;
+    {-Initialize CRT variables}
   begin
-    Patch(@Crt.AssignCrt,      @OpCrt.AssignCrt);
-    Patch(@Crt.ReadKey,        @OpCrt.ReadKey);
-    Patch(@Crt.TextMode,       @OpCrt.TextMode);
-    Patch(@Crt.KeyPressed,     @OpCrt.KeyPressed);
-    Patch(@Crt.Window,         @OpCrt.Window);
-    Patch(@Crt.GotoXy,         @OpCrt.GotoXy);
-    Patch(@Crt.WhereX,         @OpCrt.WhereX);
-    Patch(@Crt.WhereY,         @OpCrt.WhereY);
-    Patch(@Crt.ClrScr,         @OpCrt.ClrScr);
-    Patch(@Crt.ClrEol,         @OpCrt.ClrEol);
-    Patch(@Crt.InsLine,        @OpCrt.InsLine);
-    Patch(@Crt.DelLine,        @OpCrt.DelLine);
-    Patch(@Crt.TextColor,      @OpCrt.TextColor);
-    Patch(@Crt.TextBackground, @OpCrt.TextBackground);
-    Patch(@Crt.LowVideo,       @OpCrt.LowVideo);
-    Patch(@Crt.NormVideo,      @OpCrt.NormVideo);
-    Patch(@Crt.Delay,          @OpCrt.Delay);
-    Patch(@Crt.Sound,          @OpCrt.Sound);
-    Patch(@Crt.NoSound,        @OpCrt.NoSound);
+    NextChar := 0;
+    CtrlBreakFlag := False;
+    CurX := 0;
+    CurY := 0;
+    CursorSL := $0607;
+    ReInitCrt;
+    TextAttr := $07;
+    NormalAttr := $07;
   end;
 
-{$ELSE}
-
-  procedure FindSystemSeg;
-    {-Find the segment for SYSTEM}
-    {!!.21 rewritten for compatibility with pmode}
+  procedure InitConsole;
   var
-    F : Text;
+    I : Integer;
   begin
-    {$IFDEF Dpmi}
-    if PrefixSeg = 0 then begin  {in a DLL, need special handling}
-      {reopen Input}
-      AssignCrt(Input);
-      Reset(Input);
+    ConsoleOK := False;
+    KbdOK := False;
+    PhysW := 80;
+    PhysH := 25;
+    if StdIsConsole(True) and StdIsConsole(False) then begin
+      Video.InitVideo;
+      if (Video.ErrorCode = errOk) and (Video.VideoBuf <> nil) then begin
+        ConsoleOK := True;
+        PhysW := Video.ScreenWidth;
+        PhysH := Video.ScreenHeight;
+        VideoBuffer := Pointer(Video.VideoBuf);
+        {$IFDEF WINDOWS}
+        {the Video unit writes ANSI text, so use code page 437 to show the
+         library's CP437 characters correctly}
+        SavedOutCP := GetConsoleOutputCP;
+        SavedInCP := GetConsoleCP;
+        CPSaved := True;
+        if SetConsoleOutputCP(437) = 0 then ;
+        if SetConsoleCP(437) = 0 then ;
+        {$ENDIF}
+      end;
     end;
-    {$ENDIF}
-    {try to detect presence of CRT in the same program}
-    Assign(F, '');
-    SystemSeg := OS(TextRec(F).OpenFunc).S;
-
-    if OS(TextRec(Input).OpenFunc).S <> SystemSeg then
-      CrtTest;
+    if StdIsConsole(False) then begin
+      Keyboard.InitKeyboard;
+      KbdOK := True;
+    end;
+    if not ConsoleOK then begin
+      {no usable console: work on a private 80x25 buffer}
+      GetMem(OwnBuf, LongInt(PhysW)*PhysH*2);
+      for I := 0 to LongInt(PhysW)*PhysH-1 do
+        PCells(OwnBuf)^[I] := $0720;
+      VideoBuffer := OwnBuf;
+    end;
+    VirtualBuffer := VideoBuffer;
   end;
 
-{$ENDIF}
-
-  {$F+}
-  procedure OurExitProc;
-    {-Exit handler}
+  procedure DoneCrt;
+    {-Restore the console. Called automatically at program exit.}
+  var
+    I : Integer;
   begin
-    {restore previous exit handler}
+    if Finished then
+      Exit;
+    Finished := True;
+    Dirty := True;
+    FlushScreen;
+    if ConsoleOK then begin
+      CurX := 0;
+      CurY := PhysH-1;
+      CursorSL := $0607;
+      Dirty := True;
+      FlushScreen;
+    end;
+    if KbdOK then begin
+      Keyboard.DoneKeyboard;
+      KbdOK := False;
+    end;
+    if ConsoleOK then begin
+      ConsoleOK := False;
+      {$IFDEF WINDOWS}
+      if CPSaved then begin
+        if SetConsoleOutputCP(SavedOutCP) = 0 then ;
+        if SetConsoleCP(SavedInCP) = 0 then ;
+      end;
+      {$ENDIF}
+      Video.DoneVideo;
+    end;
+    {the buffers are left allocated so late screen writes stay harmless}
+  end;
+
+  procedure CrtExitProc;
+  begin
     ExitProc := SaveExitProc;
-
-    {restore ^C checking to its original state}
-    SetCBreak(SaveCtrlC);
-  end;
-
-  procedure Break; {!!.22}
-    {-Halt if break pressed (called from ASM)}
-  begin
-    Halt(255);
+    DoneCrt;
   end;
 
 begin
-  InitMemorySegments;  {initialize important pointers/selectors}      {!!.20}
-
-  {$IFDEF UseCrt}
-    {patch the entry points in the CRT unit}
-    PatchCrt;
-  {$ELSE}
-    {find the segment for SYSTEM}
-    FindSystemSeg;
-  {$ENDIF}
-
-  {initialize global variables}
+  RawCheckKbdProc := RawCheckKbdFunc(@NativeCheckKbd);
+  RawReadKeyWordProc := RawReadKeyWordFunc(@NativeReadKeyWord);
   CheckBreak := True;
   CheckEOF := False;
-
-  {save ^C checking state and turn it off}
-  GetCBreak(SaveCtrlC);
-  SetCBreak(False);
-
-  {install exit handler}
+  DirectVideo := True;
+  CheckSnow := False;
+  SaveCtrlC := False;
+  LastMode := CO80;
+  Finished := False;
+  KeyQHead := 0;
+  KeyQCount := 0;
+  EofCount := 0;
+  VisiblePage := 0;
+  ActivePageNo := 0;
+  Dirty := False;
+  InitConsole;
   SaveExitProc := ExitProc;
-  ExitProc := @OurExitProc;
-
-  {for internal use}
-  IsCompaq := (CompaqBiosName = 'COMPAQ');
-  if (ZenithBiosName = 'Zenith') then
-    IsZenith := True;
-
-  {initialize internal variables}
+  ExitProc := @CrtExitProc;
   InitCrt;
-
-  {make sure sound chip is initialized properly}             {!!.13}
-  inline(                                                    {!!.13}
-    $E4/$61/   {IN  AL,$61 ;Get current value of port $61}   {!!.13}
-    $24/$FC/   {AND AL,$FC ;Turn off bits 0 and 1}           {!!.13}
-    $E6/$61);  {OUT $61,AL ;Reset the port}                  {!!.13}
-
-  {activate colors on Hercules InColor card}
-  if WhichHerc = HercInColor then
-    SwitchInColorCard(True);
-
-  {reopen Input}
-  AssignCrt(Input);
-  Reset(Input);
-
-  {reopen Output}
-  AssignCrt(Output);
-  Rewrite(Output);
-
-  {correct some BIOS bugs involving cursor scan lines}
-  case BiosScanLines^ of                                        {!!.20}
-    $0607 :
-      if CurrentMode = 7 then
-        {mono adapter, but CGA scan lines -- happens on most mono systems}
-        BiosScanLines^ := $0B0C;                                {!!.20}
-    $0067 :
-      {incorrect scan lines bug -- most often seen on Compaqs}
-      BiosScanLines^ := $0607;                                  {!!.20}
+  DelayCalibrate;
+  if ConsoleOK then begin
+    AssignCrt(Input);
+    Reset(Input);
+    AssignCrt(Output);
+    Rewrite(Output);
   end;
 end.

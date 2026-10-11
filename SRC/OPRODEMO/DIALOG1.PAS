@@ -17,7 +17,7 @@
 *)
 
 {$V-}
-{$I OPDEFINE.INC}
+{$I opdefine.inc}
 
 {$IFDEF UseDrag}
   {$DEFINE UsingDrag}
@@ -138,7 +138,7 @@ begin
 
       {add hot spot for closing the window}
       AddCustomHeader('[ ]', frTL, +2, 0, HeaderColor, HeaderMono);
-      AddCustomHeader('þ',   frTL, +3, 0, $7A,         HeaderMono);
+      AddCustomHeader(#$FE,   frTL, +3, 0, $7A,         HeaderMono);
       AddHotRegion(frTL, CloseHotCode, +3, 0, 1, 1);
 
       {$IFDEF UsingDrag}
@@ -187,7 +187,7 @@ begin
 
   {fill in a backdrop}
   TextAttr := $07;
-  TextChar := '±';
+  TextChar := #$B1;
   ClrScr;
 
   Finished := False;

@@ -8,7 +8,7 @@
 {*                 All rights reserved.                  *}
 {*********************************************************}
 
-{$I OPDEFINE.INC}
+{$I opdefine.inc}
 
 {***************************************************************************
  This program will use features activated with the following defines:
@@ -19,6 +19,7 @@ program OpMemoTest;
   {-Test program for OPMEMO}
 
 uses
+  OpInline,                  {FPC port: MaxAvail/MemAvail}
   Dos,
   OpConst,                   {!!.20}
   OpRoot,

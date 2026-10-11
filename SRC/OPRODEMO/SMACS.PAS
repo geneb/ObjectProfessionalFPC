@@ -11,7 +11,7 @@
 {*                 All rights reserved.                  *}
 {*********************************************************}
 
-{$I OPDEFINE.INC}
+{$I opdefine.inc}
 
 {$DEFINE UseEnhKbd}        {if DEFINEd, SMACS supports enhanced keyboard}
 
@@ -28,6 +28,15 @@
 
 program SuperMacs;
 
+{$IFDEF OPFPC}
+{ FPC port: SMACS is a resident (TSR) keyboard-macro processor that hooks
+  INT 9/16h/etc., patches its own EXE image and uses the PSP. None of that
+  exists here, so the original program is kept under OPNEEDSREVIEW and only
+  this stub is built. }
+begin
+  WriteLn('SMACS requires MS-DOS TSR facilities and is not available in the FPC port.');
+end.
+{$ELSE}
 uses
   {$IFDEF UseEnhKbd}
   OpEnhKbd,  {MUST come before OPTSR!}
@@ -248,7 +257,7 @@ var
   ListItemAtTop : Word;
   MaxListItems : Word;
 
-  {$L OPSCAN.OBJ}
+  {$L opscan.obj}
 
   {$F+}
   function GetScanCodeName(B : Byte) : StringPtr; external;
@@ -2091,3 +2100,4 @@ begin
   {if we get to here we failed}
   Abort(NoCanPop);
 end.
+{$ENDIF}

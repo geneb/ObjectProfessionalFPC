@@ -347,7 +347,7 @@ type
   function InitMainMenu : Boolean;
     {-Initialize the main menu system}
   const
-    JointFrame : FrameArray = 'ÑÔÑ¾ÍÍ³³';
+    JointFrame : FrameArray = #$D1#$D4#$D1#$BE#$CD#$CD#$B3#$B3;
   begin
     InitMainMenu := False;
 
@@ -375,7 +375,7 @@ type
           AddItem('Protected item      ?? ??',   07, 1, mmProtectedDef);
           AddItem('Mouse cursor        ?? ??',   08, 1, mmMouseDef);
           AddItem('Help line           ?? ??',   09, 1, mmHelpLineDef);
-          AddSeparator('Æ', 'Í', 'µ',            10);                   {!!.03}
+          AddSeparator(#$C6, #$CD, #$B5,            10);                   {!!.03}
           AddItem('Load color set',              11, 1, mmLoadColors);  {!!.03}
           AddItem('Save color set',              12, 1, mmSaveColors);  {!!.03}
           ItemsDone;
@@ -537,9 +537,9 @@ type
                ch := Char(Byte('0')+((c div 10) mod 10))
              else
                ch := #7;
-          5: ch := 'ù';
+          5: ch := #$F9;
         else
-          ch := 'ú';
+          ch := #$FA;
         end;
         FastText(ch, r, c);
       end;

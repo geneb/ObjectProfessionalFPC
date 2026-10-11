@@ -1,10 +1,10 @@
-{$IFDEF Windows}
+{$IFDEF OPWinTP}
   !! ERROR - This unit is not compatible with Windows !!
 {$ENDIF}
 
 {$R-,S-,I-,V-,B-,F+,O+,A-} {!!.01}
 
-{$I OPDEFINE.INC}
+{$I opdefine.inc}
 
 {*********************************************************}
 {*                  OPQKREF.PAS 1.30                     *}
@@ -36,12 +36,12 @@ uses
   {$ENDIF}           {!!.03}
   ;
 
-  {$I OPQKREF.ICD}  {configuration data}
+  {$I opqkref.icd}  {configuration data}
 
 const
-  DefLeftTee  : Char = 'Ã';       {left T}
-  DefCrossBar : Char = 'Ä';       {horizontal bar}
-  DefRightTee : Char = '´';       {right T}
+  DefLeftTee  : Char = #$C3;       {left T}
+  DefCrossBar : Char = #$C4;       {horizontal bar}
+  DefRightTee : Char = #$B4;       {right T}
 
   qrMousePage      = $0001;  {clicking on scroll bar scrolls by page}
   qrSuppressBlink  = $0002;  {suppress blinking when displaying attributes?}
@@ -50,6 +50,7 @@ const
 
 type
   String20 = string[20];
+  String20Ptr = ^String20;
   QkRefChartPtr = ^QkRefChart;
   QkRefChart =
     object(CommandWindow)
@@ -136,6 +137,12 @@ var
   QkRefCommands : CommandProcessor;
   {$ENDIF}                              {!!.03}
 
+{FPC port: exported so demos need not link OPQKREF.OBJ/OPSCAN.OBJ}
+function EscapeSequence(B : Byte) : String20Ptr;
+  {-Return a pointer to a text string representing extended scan code B}
+function GetScanCodeName(B : Byte) : String20Ptr;
+  {-Return a pointer to a text string representing scan code B}
+
   {===========================================================}
 
 implementation
@@ -143,8 +150,6 @@ implementation
 const
   DividerRow = 2;
   FullWidth = 78;
-type
-  String20Ptr = ^String20;
 
 const
   {for displaying video attributes}
@@ -166,13 +171,297 @@ const
    xxx  x  xxxxxxxx  xx  xxx  xxx xxxxxx   xxxxxxx xxxxx xxxxxxxx xxxxxxx xxxxxxx }
   'Dec Chr  Binary  Hex Ascii Key Extended Scan    Color Foregrnd Backgrnd   Mono ';
 
-  {$L OPQKREF.OBJ}
-  {$L OPSCAN.OBJ}
+  {FPC port: the OPQKREF.ASM/OPSCAN.ASM key-name tables are now Pascal
+   constants and the lookup routines plain Pascal}
 
-  function EscapeSequence(B : Byte) : String20Ptr; external;
+  function EscapeSequence(B : Byte) : String20Ptr;
     {-Return a pointer to a text string representing extended scan code B}
-  function GetScanCodeName(B : Byte) : String20Ptr; external;
+  const
+    Keys : array[0..165] of string[9] = (
+      '^Break',
+      'AltEsc',
+      '',
+      '^@',
+      '',
+      '',
+      '',
+      '',
+      '',
+      '',
+      '',
+      '',
+      '',
+      '',
+      'AltBksp',
+      'ShTab',
+      'AltQ',
+      'AltW',
+      'AltE',
+      'AltR',
+      'AltT',
+      'AltY',
+      'AltU',
+      'AltI',
+      'AltO',
+      'AltP',
+      'Alt[',
+      'Alt]',
+      'AltEnter',
+      '',
+      'AltA',
+      'AltS',
+      'AltD',
+      'AltF',
+      'AltG',
+      'AltH',
+      'AltJ',
+      'AltK',
+      'AltL',
+      'Alt;',
+      'Alt''',
+      'Alt`',
+      '',
+      'Alt\',
+      'AltZ',
+      'AltX',
+      'AltC',
+      'AltV',
+      'AltB',
+      'AltN',
+      'AltM',
+      'Alt,',
+      'Alt.',
+      'Alt/',
+      '',
+      '',
+      '',
+      '',
+      '',
+      'F1',
+      'F2',
+      'F3',
+      'F4',
+      'F5',
+      'F6',
+      'F7',
+      'F8',
+      'F9',
+      'F10',
+      '',
+      '',
+      'Home',
+      'Up',
+      'PgUp',
+      '',
+      'Left',
+      'Center',
+      'Right',
+      '',
+      'End',
+      'Down',
+      'PgDn',
+      'Ins',
+      'Del',
+      'ShF1',
+      'ShF2',
+      'ShF3',
+      'ShF4',
+      'ShF5',
+      'ShF6',
+      'ShF7',
+      'ShF8',
+      'ShF9',
+      'ShF10',
+      '^F1',
+      '^F2',
+      '^F3',
+      '^F4',
+      '^F5',
+      '^F6',
+      '^F7',
+      '^F8',
+      '^F9',
+      '^F10',
+      'AltF1',
+      'AltF2',
+      'AltF3',
+      'AltF4',
+      'AltF5',
+      'AltF6',
+      'AltF7',
+      'AltF8',
+      'AltF9',
+      'AltF10',
+      '^PrtSc',
+      '^Left',
+      '^Right',
+      '^End',
+      '^PgDn',
+      '^Home',
+      'Alt1',
+      'Alt2',
+      'Alt3',
+      'Alt4',
+      'Alt5',
+      'Alt6',
+      'Alt7',
+      'Alt8',
+      'Alt9',
+      'Alt0',
+      'Alt-',
+      'Alt=',
+      '^PgUp',
+      'F11',
+      'F12',
+      'ShF11',
+      'ShF12',
+      '^F11',
+      '^F12',
+      'AltF11',
+      'AltF12',
+      '^Up',
+      '^Minus',
+      '^Center',
+      '^Plus',
+      '^Down',
+      '^Ins',
+      '^Del',
+      '^Tab',
+      '',
+      '',
+      'AltHome',
+      'AltUp',
+      'AltPgUp',
+      '',
+      'AltLeft',
+      'AltCenter',
+      'AltRight',
+      '',
+      'AltEnd',
+      'AltDown',
+      'AltPgDn',
+      'AltIns',
+      'AltDel',
+      '',
+      'AltTab'
+    );
+    MouseKeys : array[0..6] of string[9] = (
+      'ClkThree',
+      'ClkRtCtr',
+      'ClkLtCtr',
+      'ClkCenter',
+      'ClkBoth',
+      'ClkRight',
+      'ClkLeft'
+    );
+  begin
+    if B <= 165 then
+      EscapeSequence := @Keys[B]
+    else if (B >= $E9) and (B <= $EF) then
+      EscapeSequence := @MouseKeys[B-$E9]
+    else
+      EscapeSequence := @Keys[2];     {empty string}
+  end;
+
+  function GetScanCodeName(B : Byte) : String20Ptr;
     {-Return a pointer to a text string representing scan code B}
+  const
+    Scans : array[0..88] of string[9] = (
+      '',
+      'Esc',
+      '1',
+      '2',
+      '3',
+      '4',
+      '5',
+      '6',
+      '7',
+      '8',
+      '9',
+      '0',
+      '-',
+      '=',
+      'Bksp',
+      'Tab',
+      'Q',
+      'W',
+      'E',
+      'R',
+      'T',
+      'Y',
+      'U',
+      'I',
+      'O',
+      'P',
+      '[',
+      ']',
+      'Enter',
+      'Ctrl',
+      'A',
+      'S',
+      'D',
+      'F',
+      'G',
+      'H',
+      'J',
+      'K',
+      'L',
+      ';',
+      '''',
+      '`',
+      'LtShift',
+      '\',
+      'Z',
+      'X',
+      'C',
+      'V',
+      'B',
+      'N',
+      'M',
+      ',',
+      '.',
+      '/',
+      'RtShift',
+      'PrtSc',
+      'Alt',
+      'Space',
+      'CapLock',
+      'F1',
+      'F2',
+      'F3',
+      'F4',
+      'F5',
+      'F6',
+      'F7',
+      'F8',
+      'F9',
+      'F10',
+      'NumLock',
+      'ScrLock',
+      'Home',
+      'Up',
+      'PgUp',
+      'Minus',
+      'Left',
+      'Center',
+      'Right',
+      'Plus',
+      'End',
+      'Down',
+      'PgDn',
+      'Ins',
+      'Del',
+      'SysReq',
+      '',
+      '',
+      'F11',
+      'F12'
+    );
+  begin
+    if B > 88 then
+      B := 0;
+    GetScanCodeName := @Scans[B];
+  end;
 
   constructor QkRefChart.Init(X1, Y1, X2, Y2 : Byte);
     {-Initialize the quick reference chart}
@@ -852,7 +1141,7 @@ const
 
     {Read data specific to the quick ref chart}
     S.Read(qrOptions,
-            Ofs(qrHighlightMono)-Ofs(qrOptions)+SizeOf(qrHighlightMono) );
+            PtrUInt(@qrHighlightMono)-PtrUInt(@qrOptions)+SizeOf(qrHighlightMono) );
 
     {check status}
     if S.PeekStatus <> 0 then begin
@@ -871,7 +1160,7 @@ const
 
     {Write data specific to the quick ref chart}
     S.Write(qrOptions,
-            Ofs(qrHighlightMono)-Ofs(qrOptions)+SizeOf(qrHighlightMono) );
+            PtrUInt(@qrHighlightMono)-PtrUInt(@qrOptions)+SizeOf(qrHighlightMono) );
   end;
 
   procedure QkRefChartStream(SPtr : IdStreamPtr);

@@ -1,10 +1,10 @@
-{$IFDEF Windows}                                                      {!!.20}
+{$IFDEF OPWinTP}                                                      {!!.20}
   !! ERROR: This unit is not compatible with Windows applications !!  {!!.20}
 {$ENDIF}                                                              {!!.20}
 
 {$R-,S-,I-,V-,B-,F+,O+,A-} {!!.01}
 
-{$I OPDEFINE.INC}
+{$I opdefine.inc}
 
 {*********************************************************}
 {*                  OPBROWSE.PAS 1.30                    *}
@@ -21,6 +21,7 @@ interface
 uses
   Dos,
   OpInline,
+  OpJump,
   OpString,
   OpConst,  {!!.20}
   OpRoot,
@@ -37,7 +38,7 @@ uses
   {$ENDIF}         {!!.03}
   ;
 
-  {$I OPBROWSE.ICD}  {configuration data}
+  {$I opbrowse.icd}  {configuration data}
 
 const
   MaxBuf = 4095;                  {Max offset in each page buffer}
@@ -249,6 +250,11 @@ type
       procedure brGotoBlockMarker(var Marker : MarkerRec);
       procedure brToggleBlock;
       procedure brGotoLinePrim(Line : LongInt); {!!.03}
+      {FPC port: SetJump/LongJump replaced by OpJump.RunJump}
+      function  brRunGuarded(Kind : Byte; P1, P2 : LongInt; var Buffer;
+                             BufSize : Word) : Word;
+      procedure brGotoOffsetPrim(Offset : LongInt);
+      procedure brProcessSelfPrim;
       procedure brGotoLine;
       procedure brFindString(Prompt : Boolean);
       procedure brWriteMarkedBlock(ToPrinter : Boolean); virtual;
@@ -310,6 +316,13 @@ var
 
 implementation
 
+  {FPC port: the FPC heap manager has no MaxAvail; allocation failure is
+   reported by GetMemCheck}
+  function MaxAvail : LongInt;
+  begin
+    MaxAvail := High(LongInt);
+  end;
+
 
   procedure IncWorkingSet;
     {-Increment working position}
@@ -325,7 +338,58 @@ implementation
     Dec(WorkOfs);
   end;
 
-  {$I OPBROWSE.IN1}
+  const
+    brGuardProcess = 1;
+    brGuardGotoOffset = 2;
+    brGuardGotoLine = 3;
+    brGuardTransfer = 4;
+    brHandlerActive = $FFFF;
+
+  type
+    BrowserP = ^Browser;
+    BrGuardRec =
+      record
+        B : BrowserP;
+        Kind : Byte;
+        P1, P2 : LongInt;
+        Buf : Pointer;
+        BufSize : Word;
+      end;
+    BrGuardRecP = ^BrGuardRec;
+
+  procedure BrGuardThunk(Data : Pointer);
+    {-Run one guarded Browser operation inside OpJump.RunJump}
+  begin
+    with BrGuardRecP(Data)^ do
+      case Kind of
+        brGuardProcess    : B^.brProcessSelfPrim;
+        brGuardGotoOffset : B^.brGotoOffsetPrim(P1);
+        brGuardGotoLine   : B^.brGotoLinePrim(P1);
+        brGuardTransfer   : B^.brTransferPrim(P1, P2, Buf^, BufSize);
+      end;
+  end;
+
+  function Browser.brRunGuarded(Kind : Byte; P1, P2 : LongInt; var Buffer;
+                                BufSize : Word) : Word;
+    {-Run a Browser operation with an error handler active. Returns nonzero
+      if an error caused a LongJump. brErrorDest is restored afterwards.}
+  var
+    G : BrGuardRec;
+    Save : JumpRecord;
+  begin
+    G.B := @Self;
+    G.Kind := Kind;
+    G.P1 := P1;
+    G.P2 := P2;
+    G.Buf := @Buffer;
+    G.BufSize := BufSize;
+    Save := brErrorDest;
+    brErrorDest.Result := brHandlerActive;
+    brRunGuarded := RunJump(TJumpProc(@BrGuardThunk), @G);
+    brErrorDest := Save;
+  end;
+
+  {$I opbrowse.in1}
 
   constructor Browser.Init(X1, Y1, X2, Y2 : Byte; HeapToUse : LongInt);
     {-Initialize the browser}
@@ -349,6 +413,7 @@ implementation
     brPageMax := -1;
     brPages := nil;
     FillChar(brSearchSt, (Ofs(brFile)-Ofs(brSearchSt))+SizeOf(brFile), 0);
+    brErrorDest.Result := 0;   {FPC port: 0 = no error handler active}
     FileRec(brFile).Mode := fmClosed;
 
     {force wUserContents on}
@@ -451,7 +516,7 @@ implementation
     FillChar(brMarkers, SizeOf(MarkerArray), $FF);
     FillChar(brBlkBegin, SizeOf(brBlkBegin), 0);
     FillChar(brBlkEnd, SizeOf(brBlkEnd), 0);
-    brFndPos := $FFFFFFFF;
+    brFndPos := -1;
 
     brResetMask; {!!.02}
     (*           {!!.02}
@@ -627,7 +692,7 @@ implementation
         brBufferLoaded(Buffer^, BufCnt)
       else begin
         GotError(epFatal+I, emReadError);
-        if brErrorDest.JmpPt = nil then
+        if brErrorDest.Result = 0 then {FPC port: no handler active}
           Exit
         else
           LongJump(brErrorDest, 1);
@@ -714,29 +779,13 @@ ExitPoint:
 
   procedure InsertHex(var Dest; Ch : Char);
     {-Convert Ch to hex and store in Dest}
-  inline(
-    $58/                   {pop ax       ;char into al}
-    $5F/                   {pop di       ;es:di => dest}
-    $07/                   {pop es}
-    $88/$C4/               {mov ah,al    ;ah = al}
-    $80/$E4/$0F/           {and ah,$0f   ;ah has low nibble}
-    $80/$FC/$0A/           {cmp ah,$0a   ;ah >= $a?}
-    $72/$05/               {jb x1}
-    $80/$C4/$37/           {add ah,'A'-$a}
-    $EB/$03/               {jmp short x2}
-                           {x1:}
-    $80/$C4/$30/           {add ah,'0'}
-                           {x2:}
-    $B1/$04/               {mov cl,4     ;al has high nibble}
-    $D2/$E8/               {shr al,cl}
-    $3C/$0A/               {cmp al,$0a   ;al >= $a?}
-    $72/$04/               {jb x3}
-    $04/$37/               {add al,'A'-$a}
-    $EB/$02/               {jmp short x4}
-                           {x3:}
-    $04/$30/               {add al,'0'}
-                           {x4:}
-    $AB);                  {stosw        ;store it}
+  const
+    HexDigit : array[0..15] of Char = '0123456789ABCDEF';
+  begin
+    {FPC port: former inline macro}
+    Char(Dest) := HexDigit[Byte(Ch) shr 4];
+    (PChar(@Dest)+1)^ := HexDigit[Byte(Ch) and 15];
+  end;
 
   function Browser.brActualCol(Col : Integer) : Integer;  {!!.13}
     {-Return actual column for Col, accounting for tab expansion}
@@ -1325,7 +1374,7 @@ EndLoop:
   begin
     if MarkerNum <= MaxMarker then
       with brMarkers[MarkerNum] do
-        if FilePos <> $FFFFFFFF then
+        if FilePos <> -1 then
           brJumpToFilePos(FilePos, LineNum);
   end;
 
@@ -1364,7 +1413,7 @@ EndLoop:
       with brMarkers[MarkerNum] do
         if FilePos = brCurPos then
           {Clear existing marker}
-          FilePos := $FFFFFFFF
+          FilePos := -1
         else if brCurPos < brLastPos then begin
           {Set marker here}
           FilePos := brCurPos;
@@ -1576,6 +1625,18 @@ EndLoop:
   procedure Browser.ProcessSelf; {!!.01}
     {-Process browse commands}
   var
+    Dummy : Byte;
+  begin
+    {Set up error handler}
+    if brRunGuarded(brGuardProcess, 0, 0, Dummy, 0) <> 0 then begin
+      {control returns here if error occurs while browsing}
+      cwCmd := ccError;
+      Exit;
+    end;
+  end;
+
+  procedure Browser.brProcessSelfPrim;
+  var
     CmdNum : Word;
     Finished : Boolean;
     LKW : Byte;
@@ -1585,13 +1646,6 @@ EndLoop:
     {SaveMouse : Boolean;} {!!.01}
     {$ENDIF}
   begin
-    {Set up error handler}
-    if SetJump(brErrorDest) <> 0 then begin
-      {control returns here if error occurs while browsing}
-      cwCmd := ccError;
-      Exit;
-    end;
-
     {Clear any errors} {!!.01}
     ClearErrors;       {!!.01}
 

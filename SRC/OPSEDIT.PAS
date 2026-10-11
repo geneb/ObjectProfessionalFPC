@@ -1,11 +1,11 @@
 
-{$IFDEF Windows}                                                      {!!.20}
+{$IFDEF OPWinTP}                                                      {!!.20}
   !! ERROR: This unit is not compatible with Windows applications !!  {!!.20}
 {$ENDIF}                                                              {!!.20}
 
 {$S-,R-,V-,I-,B-,F+,O+,A-}
 
-{$I OPDEFINE.INC}
+{$I opdefine.inc}
 
 {*********************************************************}
 {*                   OPSEDIT.PAS 1.30                    *}
@@ -34,7 +34,7 @@ uses
   {$ENDIF}          {!!.03}
   ;
 
-  {$I OPSEDIT.ICD}  {configuration data}
+  {$I opsedit.icd}  {configuration data}
 
 const
   {option codes for simple line editor}
@@ -241,9 +241,11 @@ implementation
     const
       InsertBit  = $80;
     var
-      KeyboardFlags : ^Word; {absolute $40 : $17;}                      {!!.20}
+      KeyboardFlags : ^Word;
+      DummyFlags : Word;
     begin
-      KeyboardFlags := Ptr(BiosDataSele, $17);                          {!!.20}
+      DummyFlags := 0;
+      KeyboardFlags := @DummyFlags; { FPC port: stubbed, no BIOS data area }
       {toggle insert flag}
       seInsertMode := not seInsertMode;
 

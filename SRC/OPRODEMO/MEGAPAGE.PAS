@@ -29,7 +29,7 @@
 program MEGAPAGE;
 
 uses
-  DOS, OPCrt, OPRoot, OPString;
+  DOS, OpInline, OPCrt, OPRoot, OPString;
 
 const
   BuffSize = 16384;
@@ -442,4 +442,3 @@ begin
 end.
 
 
-

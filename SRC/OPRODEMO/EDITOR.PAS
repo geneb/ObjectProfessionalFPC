@@ -8,7 +8,7 @@
 {*                 All rights reserved.                  *}
 {*********************************************************}
 
-{$I OPDEFINE.INC}
+{$I opdefine.inc}
 
 {***************************************************************************
  This program will use features activated with the following defines:
@@ -19,6 +19,7 @@ program OpEditorDemo;
   {-Demo program for OPEDITOR}
 
 uses
+  OpInline,                  {FPC port: MaxAvail/MemAvail}
   Dos,
   OpCmd,
   OpCrt,
@@ -435,7 +436,7 @@ begin
 
     {$IFDEF UseScrollBars}
     {add a custom scroll bar}
-    wFrame.AddCustomScrollBar(frRR, 0, MaxLongInt, 2, 0, '²', '°', OurColorSet);
+    wFrame.AddCustomScrollBar(frRR, 0, MaxLongInt, 2, 0, #$B2, #$B0, OurColorSet);
     {$ENDIF}
 
     {use our special status display routine}

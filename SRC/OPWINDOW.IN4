@@ -9,7 +9,7 @@
   constructor WindowStack.Init(Max : Word);
     {-Allocate stack and initialize}
   begin
-    wsScreen.Init(1, 1, 0);
+    wsScreen.Init(1, 1, nil);
     if not PointerStack.Init(Max) then
       Fail;
     wsLevel := 0;
@@ -278,7 +278,7 @@
   var
     I : Word;
   begin
-    wsScreen.Init(1, 1, 0);
+    wsScreen.Init(1, 1, nil);
     if not PointerStack.Load(S) then
       Fail;
     wsLevel := 0;
@@ -539,11 +539,15 @@
 
   function CommandWindow.GetLastError : Word;
     {-Return last CommandWindow error code}
+  var
+    E : Word;
   begin
+    {FPC port: use a local, the method name would shadow the result inside WITH}
     with cwActiveCwPtr^ do begin {!!.01}
-      GetLastError := cwGetLastError;
+      E := cwGetLastError;
       cwError := 0;
     end;
+    GetLastError := E;
   end;
 
   function CommandWindow.PeekLastError : Word;
@@ -721,12 +725,20 @@
 
   {-------------------- VirtScreen Routines -------------------------}
 
+  function VsBytePtr(Base : Pointer; Ofst : LongInt) : PByte;
+    {-FPC port: address of byte Ofst in a screen/virtual buffer}
+  begin
+    VsBytePtr := PByte(PtrUInt(Base)+PtrUInt(Ofst));
+  end;
+
   procedure VirtScreen.vsZeroOut;
     {-Clear the data fields of a virtual screen object}
   begin
     vsWidth := 0;
     vsHeight := 0;
     vsVideoSeg := 0;
+    vsVideoPtr := nil;
+    vsSavePtr := nil;
     vsSize := 0;
     vsBufPtr := nil;
     vsAllocated := False;
@@ -736,9 +748,6 @@
     {-Create a virtual screen of the specified dimensions}
   var
     Size : LongInt;
-{$IFDEF Dpmi}              {!!.20}
-    SaveSize : LongInt;    {!!.20}
-{$ENDIF}                   {!!.20}
   begin
     vsZeroOut;
     if not Root.Init then
@@ -751,41 +760,23 @@
       Fail;
     end;
 
-{$IFDEF Dpmi}              {!!.20 begin}
-    {set HeapLimit to our allocation size to force a 0-offset selector}
-    SaveSize := HeapLimit;
-    HeapLimit := Size;
     if not GetMemCheck(vsBufPtr, Size) then begin
-      HeapLimit := SaveSize;
       Done;
       InitStatus := epFatal+ecOutOfMemory;
       Fail;
     end;
-    HeapLimit := SaveSize;
-{$ELSE}                    {!!.20 end}
-    if not GetMemCheck(vsBufPtr, Size+15) then begin
-      Done;
-      InitStatus := epFatal+ecOutOfMemory;
-      Fail;
-    end;
-{$ENDIF}                   {!!.20}
 
     vsWidth := Width;
     vsHeight := Height;
     vsSize := Size;
     vsAllocated := True;
-    {Choose segment such that vsVideoSeg:0 is within buffer}
-    vsVideoSeg := OS(vsBufPtr).S;
-{$IFNDEF Dpmi}                                                         {!!.20}
-    if OS(vsBufPtr).O <> 0 then
-      inc(vsVideoSeg);
-{$ENDIF}                                                               {!!.20}
+    vsVideoPtr := vsBufPtr;   {FPC port: no segment arithmetic needed}
 
     {Initialize the buffer}
     Clear(TextAttr, TextChar);
   end;
 
-  constructor VirtScreen.Init(Height, Width : Word; BufSeg : Word);
+  constructor VirtScreen.Init(Height, Width : Word; BufPtr : Pointer);
     {-Initialize a virtual screen with a preallocated buffer}
   var
     Size : LongInt;
@@ -804,10 +795,10 @@
     vsWidth := Width;
     vsHeight := Height;
     vsSize := Size;
-    vsVideoSeg := BufSeg;
+    vsVideoPtr := BufPtr;
 
     {Initialize the buffer}
-    if BufSeg <> 0 then                 {!!.20}
+    if BufPtr <> nil then                 {!!.20}
       Clear(TextAttr, TextChar);
   end;
 
@@ -815,11 +806,7 @@
     {-Deallocate a virtual screen}
   begin
     if vsAllocated then
-{$IFDEF Dpmi}                             {!!.22}
-      FreeMemCheck(vsBufPtr, vsSize);     {!!.22}
-{$ELSE}                                   {!!.22}
-      FreeMemCheck(vsBufPtr, vsSize+15);
-{$ENDIF}                                  {!!.22}
+      FreeMemCheck(vsBufPtr, vsSize);
     vsZeroOut;
     Root.Done;
   end;
@@ -827,10 +814,10 @@
   procedure VirtScreen.Activate;
     {-Activate fastwriting to virtual screen}
   begin
-    vsSaveSeg := OpCrt.VirtualSegment;
+    vsSavePtr := OpCrt.VirtualBuffer;
     vsSaveHeight := OpCrt.VirtualHeight;
     vsSaveWidth := OpCrt.VirtualWidth;
-    OpCrt.VirtualSegment := vsVideoSeg;
+    OpCrt.VirtualBuffer := vsVideoPtr;
     OpCrt.VirtualHeight := vsHeight;
     OpCrt.VirtualWidth := vsWidth;
   end;
@@ -838,7 +825,7 @@
   procedure VirtScreen.Deactivate;
     {-Deactivate fastwriting to virtual screen}
   begin
-    OpCrt.VirtualSegment := vsSaveSeg;
+    OpCrt.VirtualBuffer := vsSavePtr;
     OpCrt.VirtualWidth := vsSaveWidth;
     OpCrt.VirtualHeight := vsSaveHeight;
   end;
@@ -849,112 +836,72 @@
     FW : Word;
   begin
     FW := Swap(Word(Attr)) or Word(Fill);
-    FillWord(mem[vsVideoSeg:0], vsSize shr 1, FW);
+    FillWord(VsBytePtr(vsVideoPtr, 0)^, vsSize shr 1, FW);
   end;
 
   procedure VirtScreen.WriteTo(S : string; Row, Col : Word; Attr : Byte);
     {-Write a string to virtual screen}
   var
-    Segm : Word;
-    Lofs : Word;
-    Width : Word;
+    Start : LongInt;
+    Count : LongInt;
+    I : LongInt;
+    W : Word;
+    CP : PWord;
   begin
-    Segm := vsVideoSeg;
-    Lofs := vsSize;
-    Width := vsWidth;
-    inline
-     ($1E/                 {push    ds                  ;save DS}
-      $16/                 {push    ss}
-      $1F/                 {pop     ds}
-      $8D/$B6/>S/          {lea     si,[bp+>S]          ;DS:SI -> string to write}
-      $8A/$0C/             {mov     cl,[si]}
-      $30/$ED/             {xor     ch,ch               ;CX = length to write}
-      $E3/$30/             {jcxz    done                ;get out if empty string}
-      $8B/$86/>Row/        {mov     ax,[bp+>Row]        ;row number}
-      $48/                 {dec     ax                  ;zero-based}
-      $F7/$A6/>Width/      {mul     word ptr [bp+>Width] ;multiply by columns in virtual screen}
-      $03/$86/>Col/        {add     ax,[bp+>Col]        ;add column}
-      $48/                 {dec     ax                  ;zero-based}
-      $D1/$E0/             {shl     ax,1                ;account for attributes}
-      $89/$C7/             {mov     di,ax               ;store destination offset}
-      $2B/$86/>Lofs/       {sub     ax,[bp+>Lofs]}
-      $77/$18/             {ja      done                ;jump if destination is beyond end of buffer}
-      $F7/$D8/             {neg     ax}
-      $D1/$E8/             {shr     ax,1                ;AX = number of chars left on virtual screen}
-      $39/$C8/             {cmp     ax,cx               ;compare to characters to write}
-      $73/$02/             {jae     leavelen            ;jump if space}
-      $89/$C1/             {mov     cx,ax               ;only write what fits}
-      {leavelen:}
-      $8A/$A6/>Attr/       {mov     ah,[bp+>attr]       ;get attribute to write with}
-      $8E/$86/>Segm/       {mov     es,[bp+>segm]       ;ES:DI -> output destination}
-      $46/                 {inc     si                  ;skip length byte}
-      $FC/                 {cld                         ;forward}
-      {next:}
-      $AC/                 {lodsb                       ;load character from string}
-      $AB/                 {stosw                       ;store character and attribute}
-      $E2/$FC/             {loop    next                ;write 'em all}
-      {done:}
-      $1F);                {pop     ds                  ;restore ds}
+    Count := Length(S);
+    if (Count = 0) or (Row = 0) or (Col = 0) then
+      Exit;
+    {cell index of destination}
+    Start := (LongInt(Row)-1)*vsWidth+(Col-1);
+    if Start*2 >= vsSize then
+      Exit;
+    if Start*2+Count*2 > vsSize then
+      Count := (vsSize-Start*2) shr 1;
+    for I := 1 to Count do begin
+      W := (Word(Attr) shl 8) or Ord(S[I]);
+      CP := PWord(VsBytePtr(vsVideoPtr, (Start+I-1)*2));
+      CP^ := W;
+    end;
   end;
 
   procedure VirtScreen.ReadFrom(Number : Byte; Row, Col : Word; var S : string);
     {-Read number characters from the virtual screen starting at Row,Col}
   var
-    Segm : Word;
-    Lofs : Word;
-    Width : Word;
+    Start : LongInt;
+    Count : LongInt;
+    I : LongInt;
+    CP : PWord;
   begin
-    Segm := VsVideoSeg;
-    Lofs := VsSize;
-    Width := VsWidth;
-    inline
-     ($1E/                 {push ds}
-      $8E/$5E/<Segm/       {mov  ds,[bp+<Segm]       ;DS -> virtual screen}
-      $C4/$7E/<S/          {les  di,[bp+<S]          ;ES:DI -> string S}
-      $8A/$4E/<Number/     {mov  cl,[bp+<Number]}
-      $30/$ED/             {xor  ch,ch               ;CX = number of characters to read}
-      $8B/$46/<Row/        {mov  ax,[bp+<Row]        ;AX = row number}
-      $48/                 {dec  ax                  ;zero-based}
-      $F7/$66/<Width/      {mul  word ptr [bp+<Width] ;multiply by columns in virtual screen}
-      $03/$46/<Col/        {add  ax,[bp+<Col]        ;add column}
-      $48/                 {dec  ax                  ;zero-based}
-      $D1/$E0/             {shl  ax,1                ;account for attributes}
-      $89/$C6/             {mov  si,ax               ;store starting source offset}
-      $2B/$46/<Lofs/       {sub  ax,[bp+<Lofs]}
-      $F7/$D8/             {neg  ax}
-      $D1/$E8/             {shr  ax,1                ;AX = characters left on virtual screen}
-      $39/$C8/             {cmp  ax,cx               ;compare characters left to requested}
-      $73/$02/             {jae  storelen            ;jump if enough left}
-      $89/$C1/             {mov  cx,ax               ;only return what there are}
-      {storelen:}
-      $FC/                 {cld                      ;forward}
-      $88/$C8/             {mov  al,cl}
-      $AA/                 {stosb                    ;store length of string}
-      $E3/$04/             {jcxz done                ;get out if no characters to transfer}
-      {next:}
-      $AD/                 {lodsw                    ;load next character/attribute pair}
-      $AA/                 {stosb                    ;store just the character}
-      $E2/$FC/             {loop next                ;get as many as requested}
-      {done:}
-      $1F);                {pop  ds                  ;restore DS}
+    Count := Number;
+    S[0] := #0;
+    if (Row = 0) or (Col = 0) then
+      Exit;
+    Start := (LongInt(Row)-1)*vsWidth+(Col-1);
+    if Start*2 >= vsSize then
+      Exit;
+    if Start*2+Count*2 > vsSize then
+      Count := (vsSize-Start*2) shr 1;
+    S[0] := Chr(Count);
+    for I := 1 to Count do begin
+      CP := PWord(VsBytePtr(vsVideoPtr, (Start+I-1)*2));
+      S[I] := Chr(Lo(CP^));
+    end;
   end;
 
   procedure VirtScreen.ScrollHoriz(Cols : Integer; Attr : Byte; Fill : Char);
     {-Scroll contents horizontally}
   var
     WordsToMove : Word;
-    BytesAcross : Integer;
-    SrcPos : Word;
-    DestPos : Word;
+    BytesAcross : LongInt;
+    SrcPos : LongInt;
+    DestPos : LongInt;
     Row : Word;
     FW : Word;
-    VSeg : Word;
   begin
     if Cols = 0 then
       Exit;
 
-    BytesAcross := Integer(2)*vsWidth;
-    VSeg := vsVideoSeg;
+    BytesAcross := LongInt(2)*vsWidth;
 
     {Shift existing text}
     if Abs(Cols) < vsWidth then begin
@@ -966,7 +913,8 @@
       else
         inc(DestPos, 2*Abs(Cols));
       for Row := 1 to vsHeight do begin
-        move(Mem[VSeg:SrcPos], Mem[VSeg:DestPos], WordsToMove);
+        move(VsBytePtr(vsVideoPtr, SrcPos)^, VsBytePtr(vsVideoPtr, DestPos)^,
+             LongInt(WordsToMove)*2);
         Inc(SrcPos, BytesAcross);
         Inc(DestPos, BytesAcross);
       end;
@@ -976,11 +924,11 @@
     FW := Swap(Word(Attr)) or Word(Fill);
     WordsToMove := Abs(Cols);
     if Cols > 0 then
-      DestPos := Word(2)*(vsWidth-Cols)
+      DestPos := LongInt(2)*(vsWidth-Cols)
     else
       DestPos := 0;
     for Row := 1 to vsHeight do begin
-      FillWord(Mem[VSeg:DestPos], WordsToMove, FW);
+      FillWord(VsBytePtr(vsVideoPtr, DestPos)^, WordsToMove, FW);
       inc(DestPos, BytesAcross);
     end;
   end;
@@ -988,14 +936,14 @@
   procedure VirtScreen.ScrollVert(Rows : Integer; Attr : Byte; Fill : Char);
     {-Scroll contents vertically}   {!!.03} {rewritten--changes throughout}
   var
-    SrcPos, DestPos : Word;
-    BytesPerRow, BytesToMove : Word;
+    SrcPos, DestPos : LongInt;
+    BytesPerRow, BytesToMove : LongInt;
   begin
+    BytesPerRow := LongInt(vsWidth)*2;
     if (Rows = 0) or (Abs(Rows) >= vsHeight) then
       Rows := vsHeight
     else begin
       {Move existing text}
-      BytesPerRow := vsWidth*2;
       BytesToMove := BytesPerRow*(vsHeight-Abs(Rows));
       if Rows > 0 then begin
         SrcPos := Rows*BytesPerRow;
@@ -1005,7 +953,8 @@
         SrcPos := 0;
         DestPos := Abs(Rows)*BytesPerRow;
       end;
-      Move(Mem[vsVideoSeg:SrcPos], Mem[vsVideoSeg:DestPos], BytesToMove);
+      Move(VsBytePtr(vsVideoPtr, SrcPos)^, VsBytePtr(vsVideoPtr, DestPos)^,
+           BytesToMove);
     end;
 
     {Fill remaining region}
@@ -1013,14 +962,15 @@
       DestPos := BytesPerRow*(vsHeight-Rows)
     else
       DestPos := 0;
-    FillWord(
-      Mem[vsVideoSeg:DestPos], vsWidth*Abs(Rows), Swap(Attr) or Word(Fill));
+    FillWord(VsBytePtr(vsVideoPtr, DestPos)^, vsWidth*Abs(Rows),
+             Swap(Word(Attr)) or Word(Fill));
   end;
 
   procedure VirtScreenWindowSetup(var VS : VirtScreen;
                                   Row, Col : Word;
-                                  var RMin, RMax, Vofs,
-                                  Cofs, Cwid : Word);
+                                  var RMin, RMax : Word;
+                                  var Vofs, Cofs : LongInt;
+                                  var Cwid : Word);
     {-Set up factors for addressing virtual screen}
   var
     CMin : Word;
@@ -1030,8 +980,8 @@
       CWid := MinWord(lo(OpCrt.WindMax)-CMin, vsWidth-Col)+1;
       RMin := hi(OpCrt.WindMin);
       RMax := MinWord(hi(OpCrt.WindMax)-RMin, vsHeight-Row)+RMin;
-      vOfs := 2*((Row-1)*vsWidth+(Col-1));
-      cOfs := 2*(RMin*OpCrt.VirtualWidth+CMin);
+      vOfs := LongInt(2)*((Row-1)*vsWidth+(Col-1));
+      cOfs := LongInt(2)*(RMin*OpCrt.VirtualWidth+CMin);
     end;
   end;
 
@@ -1041,11 +991,10 @@
     CWid : Word;
     RMin : Word;
     RMax : Word;
-    cOfs : Word;
-    vOfs : Word;
+    cOfs : LongInt;
+    vOfs : LongInt;
     R : Word;
-    vSeg : Word;
-    vWid : Word;
+    vWid : LongInt;
     {$IFDEF UseMouse}
     MOn : Boolean;
     {$ENDIF}
@@ -1056,17 +1005,16 @@
       Exit;
     VirtScreenWindowSetup(Self, Row, Col, RMin, RMax, Vofs, Cofs, Cwid);
 
-    vSeg := vsVideoSeg;
-    vWid := 2*vsWidth;
+    vWid := LongInt(2)*vsWidth;
 
     {$IFDEF UseMouse}
     HideMousePrim(MOn);
     {$ENDIF}
 
     for R := RMin to RMax do begin
-      MoveScreen(mem[OpCrt.VirtualSegment:cOfs], mem[vSeg:vOfs], CWid);
+      MoveScreen(VsBytePtr(OpCrt.VirtualBuffer, cOfs)^, VsBytePtr(vsVideoPtr, vOfs)^, CWid);
       Inc(vOfs, vWid);
-      Inc(cOfs, 2*OpCrt.VirtualWidth);
+      Inc(cOfs, LongInt(2)*OpCrt.VirtualWidth);
     end;
 
     {$IFDEF UseMouse}
@@ -1081,11 +1029,10 @@
     CWid : Word;
     RMin : Word;
     RMax : Word;
-    cOfs : Word;
-    vOfs : Word;
+    cOfs : LongInt;
+    vOfs : LongInt;
     R : Word;
-    vSeg : Word;
-    vWid : Word;
+    vWid : LongInt;
     {$IFDEF UseMouse}
     MOn : Boolean;
     {$ENDIF}
@@ -1101,8 +1048,7 @@
     end;
     VirtScreenWindowSetup(Self, Row, Col, RMin, RMax, Vofs, Cofs, Cwid);
 
-    vSeg := vsVideoSeg;
-    vWid := 2*vsWidth;
+    vWid := LongInt(2)*vsWidth;
 
     {$IFDEF UseMouse}
     HideMousePrim(MOn);
@@ -1110,12 +1056,12 @@
 
     WWid := lo(OpCrt.WindMax)-lo(OpCrt.WindMin)+1;
     for R := RMin to RMax do begin
-      MoveScreen(mem[vSeg:vOfs], mem[OpCrt.VirtualSegment:cOfs], CWid);
+      MoveScreen(VsBytePtr(vsVideoPtr, vOfs)^, VsBytePtr(OpCrt.VirtualBuffer, cOfs)^, CWid);
       if CWid < WWid then
         {Clear unfilled columns}
         FastFill(WWid-CWid, TextChar, R+1, lo(OpCrt.WindMin)+CWid+1, TextAttr);
       Inc(vOfs, vWid);
-      Inc(cOfs, 2*OpCrt.VirtualWidth);
+      Inc(cOfs, LongInt(2)*OpCrt.VirtualWidth);
     end;
 
     {Clear unfilled rows}
@@ -1179,22 +1125,22 @@
       Fail;
 
     S.ReadRange(vsWidth, vsSaveSeg);
+    vsVideoPtr := nil;
+    vsSavePtr := nil;
     if S.PeekStatus <> 0 then begin
+      vsAllocated := False;
       Done;
       Fail;
     end;
     if vsAllocated then begin
-      if not GetMemCheck(vsBufPtr, vsSize+15) then begin
+      vsBufPtr := nil;  {FPC port: stored pointer is meaningless}
+      if not GetMemCheck(vsBufPtr, vsSize) then begin
+        vsAllocated := False;
         Done;
         InitStatus := epFatal+ecOutOfMemory;
         Fail;
       end;
-      {Choose segment such that vsVideoSeg:0 is within buffer}
-      vsVideoSeg := OS(vsBufPtr).S;
-{$IFNDEF Dpmi}
-      if OS(vsBufPtr).O <> 0 then
-        inc(vsVideoSeg);
-{$ENDIF}
+      vsVideoPtr := vsBufPtr;
     end;
   end;
 
@@ -1216,14 +1162,167 @@
 
   {--------- PackedWindow Routines ----------}
 
-  {$L OPPACK.OBJ}
+  {FPC port: the former OPPACK.OBJ routines are ported to Pascal. The packed
+   format is unchanged.}
 
-  {routines in OPPACK.OBJ}
-  function PackPrim(Height, Width : Byte; var Dest; SrcOfs : Word;
-                    var Delta : Word) : Word; external;
+type
+  PackByteArray = array[0..$FFFFF] of Byte;
+  PackByteArrayPtr = ^PackByteArray;
 
-  procedure PackedWindow.pwDisplay(Row, Col : Word); external;
+  procedure PackPutWord(P : PackByteArrayPtr; Ofst : LongInt; W : Word);
+  begin
+    P^[Ofst] := Lo(W);
+    P^[Ofst+1] := Hi(W);
+  end;
+
+  function PackGetWord(P : PackByteArrayPtr; Ofst : LongInt) : Word;
+  begin
+    PackGetWord := Word(P^[Ofst]) or (Word(P^[Ofst+1]) shl 8);
+  end;
+
+  function PackPrim(Height, Width : Byte; var Dest; SrcOfs : LongInt;
+                    var Delta : Word) : Word;
+    {-Primitive routine to pack a window. Called once for the characters and
+      once for the attributes}
+  const
+    PackRecSize = 5;
+  var
+    D : PackByteArrayPtr;
+    Src : PackByteArrayPtr;
+    RowStart, Pos, DI, Count, PRdelta, LastLink, Ldelta : LongInt;
+    R, C : Word;
+    AL, AH : Byte;
+  begin
+    D := PackByteArrayPtr(@Dest);
+    Src := PackByteArrayPtr(VirtualBuffer);
+    Count := 1;
+    PRdelta := 0;
+    LastLink := -1;
+    Ldelta := 0;
+    DI := 0;
+    RowStart := SrcOfs;
+    AH := Src^[SrcOfs];  {raw, so the first byte never matches}
+
+    for R := 1 to Height do begin
+      Pos := RowStart;
+      for C := 1 to Width do begin
+        AL := not Src^[Pos];
+        Inc(Pos, 2);
+        D^[DI] := AL;
+        Inc(DI);
+        Inc(PRdelta);
+        if AL = AH then
+          Inc(Count)
+        else begin
+          if Count > PackRecSize then begin
+            Dec(PRdelta, Count+1);
+            if LastLink = -1 then
+              Ldelta := PRdelta
+            else
+              PackPutWord(D, LastLink, Word(PRdelta));
+            {make a PackRec over the run, then re-append the new byte}
+            DI := DI-Count-1;
+            LastLink := DI;
+            Inc(DI, 2);
+            D^[DI] := AH;
+            Inc(DI);
+            PackPutWord(D, DI, Word(Count));
+            Inc(DI, 2);
+            D^[DI] := AL;
+            Inc(DI);
+            PRdelta := 1;
+          end;
+          AH := AL;
+          Count := 1;
+        end;
+      end;
+      Inc(RowStart, LongInt(2)*VirtualWidth);
+    end;
+
+    {fill in the previous link}
+    if Count > PackRecSize then
+      PRdelta := PRdelta-Count;
+    if LastLink = -1 then
+      Ldelta := PRdelta
+    else
+      PackPutWord(D, LastLink, Word(PRdelta));
+
+    {do we need a final PackRec?}
+    if Count > PackRecSize then begin
+      DI := DI-Count;
+      PackPutWord(D, DI, 0);
+      Inc(DI, 2);
+      D^[DI] := AH;
+      Inc(DI);
+      PackPutWord(D, DI, Word(Count));
+      Inc(DI, 2);
+    end;
+
+    Delta := Word(Ldelta);
+    PackPrim := Word(DI);
+  end;
+
+  procedure PackedWindow.pwDisplay(Row, Col : Word);
     {-Display the packed window at Row,Col}
+  var
+    SrcC, SrcA : LongInt;       {indexes of next char/attr data bytes}
+    NextRecC, NextRecA : Word;
+    FillCntC, FillCntA : Word;
+    Ch, At : Byte;
+    P : PackByteArrayPtr;
+    RowBuf : array[0..255] of Word;
+    R, C : Word;
+    Cell : LongInt;
+  begin
+    if pwScreen = nil then
+      Exit;
+    P := PackByteArrayPtr(pwScreen);
+    NextRecC := pwCDelta;
+    NextRecA := pwADelta;
+    SrcC := 0;
+    SrcA := LongInt(pwAStart)-1;
+    FillCntC := 0;
+    FillCntA := 0;
+    Ch := 0;
+    At := 0;
+    Cell := (LongInt(Row)-1)*VirtualWidth+(Col-1);
+
+    for R := 1 to pwRows do begin
+      for C := 0 to Pred(pwCols) do begin
+        {get next character}
+        if FillCntC <> 0 then
+          Dec(FillCntC)
+        else if NextRecC = 0 then begin
+          NextRecC := PackGetWord(P, SrcC);
+          Ch := not P^[SrcC+2];
+          FillCntC := PackGetWord(P, SrcC+3)-1;
+          Inc(SrcC, 5);
+        end else begin
+          Ch := not P^[SrcC];
+          Inc(SrcC);
+          Dec(NextRecC);
+        end;
+
+        {get next attribute}
+        if FillCntA <> 0 then
+          Dec(FillCntA)
+        else if NextRecA = 0 then begin
+          NextRecA := PackGetWord(P, SrcA);
+          At := not P^[SrcA+2];
+          FillCntA := PackGetWord(P, SrcA+3)-1;
+          Inc(SrcA, 5);
+        end else begin
+          At := not P^[SrcA];
+          Inc(SrcA);
+          Dec(NextRecA);
+        end;
+
+        RowBuf[C] := (Word(At) shl 8) or Ch;
+      end;
+      MoveScreen(RowBuf[0], VsBytePtr(VirtualBuffer, Cell*2)^, pwCols);
+      Inc(Cell, VirtualWidth);
+    end;
+  end;
 
   constructor PackedWindow.Init(XL, YL, XH, YH : Byte);
     {-Create a packed window}
@@ -1234,7 +1333,7 @@
     FinalSize : Word;
     Width : Integer;
     Height : Integer;
-    SrcOfs : Word;
+    SrcOfs : LongInt;
     P : Pointer;
     S : Word;       {!!.10}
   begin
@@ -1263,7 +1362,7 @@
     end;
 
     {calculate starting offset on screen}
-    SrcOfs := ((Pred(YL)*VirtualWidth)+Pred(XL)) shl 1;
+    SrcOfs := ((Pred(YL)*LongInt(VirtualWidth))+Pred(XL)) shl 1;
 
     {pack the characters and attributes}
     I := PackPrim(Height, Width, pwScreen^, SrcOfs, pwCDelta);
@@ -1278,38 +1377,25 @@
     pwAStart := I+1;
 
     {free up unused portion of window}
-{$IFDEF Dpmi}                                {!!.20}
-    S := (pwSize+$07) and $FFF8;             {!!.20}
-    if GetMemCheck(P, S) then begin          {!!.20}
-      pwSize := S;                           {!!.20}
-      Move(pwScreen^, P^, S);                {!!.20}
-      FreeMemCheck(pwScreen, InitialSize);   {!!.20}
-      pwScreen := P;                         {!!.20}
-    end;                                     {!!.20}
-{$ELSE}                                      {!!.20}
-    {$IFDEF Heap6}                       {!!.10}
-    S := (pwSize+$07) and $FFF8;         {!!.11}
-    pwSize := S;                         {!!.20}
-    {$ELSE}                              {!!.10}
-    S := pwSize;                         {!!.10}
-    {$ENDIF}                             {!!.10}
-    P := Normalized( @pwScreen^[S+1] );  {!!.10}
-    FreeMem(P, InitialSize-S);           {!!.10}
-{$ENDIF}                                     {!!.20}
+    {FPC port: heap blocks cannot be shrunk in place, so copy to a smaller one}
+    S := pwSize;
+    if GetMemCheck(P, S) then begin
+      Move(pwScreen^, P^, S);
+      FreeMemCheck(pwScreen, InitialSize);
+      pwScreen := P;
+    end;
   end;
 
   constructor PackedWindow.InitFromMemory(P : Pointer);
     {-Initialize a packed window from one stored to disk with Write
       and bound into the EXE file with BINOBJ}
-  var
-    OSP : OS absolute P;
   begin
     pwScreen := nil;
     pwDealloc := False;
     if not Root.Init then
       Fail;
     Move(P^, pwSize, Ofs(pwScreen)-Ofs(pwSize));
-    pwScreen := Ptr(OSP.S, OSP.O+Ofs(pwScreen)-Ofs(pwSize));
+    pwScreen := Pointer(PtrUInt(P)+PtrUInt(Ofs(pwScreen)-Ofs(pwSize)));
   end;
 
   destructor PackedWindow.Done;
@@ -1354,17 +1440,18 @@
     {-Map the colors of the packed window for improved appearance on
       mono/B&W displays}
   var
-    Segm, Ofst : Word;
-    LastOfst, Count : Word;
+    P : PackByteArrayPtr;
+    Ofst, LastOfst : LongInt;
+    Count : Word;
   begin
     {get out fast if color mapping not needed}
     if UseColor or (pwScreen = nil) then
       Exit;
 
-    {get starting address of the attributes in Contents}
-    Segm := OS(pwScreen).S;
-    Ofst := Ofs(pwScreen^[pwAStart]);
-    LastOfst := Ofs(pwScreen^[pwSize]);
+    {get starting index of the attributes in Contents}
+    P := PackByteArrayPtr(pwScreen);
+    Ofst := LongInt(pwAStart)-1;
+    LastOfst := LongInt(pwSize)-1;
 
     {get number of attributes before the first PackRec}
     Count := pwADelta;
@@ -1373,17 +1460,17 @@
       {is it a PackRec?}
       if Count = 0 then begin
         {get number of attributes before the next PackRec}
-        Count := MemW[Segm:Ofst];
+        Count := PackGetWord(P, Ofst);
 
         {map the FillVal}
-        Mem[Segm:Ofst+2] := not ColorMap[not Mem[Segm:Ofst+2]];
+        P^[Ofst+2] := not ColorMap[not P^[Ofst+2]];
 
         {skip over the PackRec}
         Inc(Ofst, SizeOf(PackRec));
       end
       else begin
         {map the attribute}
-        Mem[Segm:Ofst] := not ColorMap[not Mem[Segm:Ofst]];
+        P^[Ofst] := not ColorMap[not P^[Ofst]];
 
         {decrement counter to next PackRec}
         Dec(Count);
@@ -1391,7 +1478,7 @@
         {skip ahead}
         Inc(Ofst);
       end;
-    until (Ofst > LastOfst) or (Ofst = 0);
+    until Ofst > LastOfst;
   end;
 
   function PackedWindow.Write(FName : string) : Word;

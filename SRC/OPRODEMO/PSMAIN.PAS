@@ -6,7 +6,7 @@
 {*                 All rights reserved.                  *}
 {*********************************************************}
 
-{$I OPDEFINE.INC}
+{$I opdefine.inc}
 
 {***************************************************************************
  This program will use features activated with the following defines:
@@ -108,24 +108,19 @@ var
 
   function TwiddleColor(B : Byte) : Byte;
     {-Twiddle a color attribute}
-  inline(
-    $58/                          {POP     AX}
-    $34/$11);                     {XOR     AL,$11  ;twiddle the back/fore colors}
+  begin
+    TwiddleColor := B xor $11;  {twiddle the back/fore colors}
+  end;
 
   function TwiddleMono(B : Byte) : Byte;
     {-Twiddle a monochrome attribute}
-  inline(
-    $58/                          {POP     AX}
-    $24/$7F/                      {AND     AL,$7F  ;clear high bit}
-    $3C/$70/                      {CMP     AL,$70  ;already reverse video?}
-    $74/$08/                      {JE      FAMono}
-    $3C/$78/                      {CMP     AL,$78}
-    $74/$04/                      {JE      FAMono}
-    $B0/$70/                      {MOV     AL,$70  ;set reverse video}
-    $EB/$02/                      {JMP     SHORT FAexit}
-    {                              FAMono:}
-    $B0/$0F);                     {MOV     AL,$0F  ;select white on black}
-    {                              FAexit:}
+  begin
+    B := B and $7F;             {clear high bit}
+    if (B = $70) or (B = $78) then
+      TwiddleMono := $0F        {select white on black}
+    else
+      TwiddleMono := $70;       {set reverse video}
+  end;
 
   procedure SetAttributes;
     {-Set video attribute variables based on the current video mode}
@@ -355,7 +350,7 @@ var
       {save the screen}
       if SaveWindow(1, 1, ScreenWidth, ScreenHeight, True, MainBufPtr) then
         {won't fail} ;
-      ScreenPtr := Ptr(VideoSegment, 0);
+      ScreenPtr := VideoBuffer;  {FPC port: screen cell buffer instead of video segment}
     end;
 
     procedure RestoreWholeScreen;
@@ -766,7 +761,7 @@ var
       Abort('Can''t be loaded after SideKick!');
 
     {go resident}
-    if DefinePop(OurHotKey, PopupEntryPoint, Ptr(SSeg, SPtr)) then begin
+    if DefinePop(OurHotKey, PopupEntryPoint, nil {FPC port: no stack pointer}) then begin
       WriteLn('PSCREEN loaded. Press Alt-LeftShift-P to activate.');
 
       {Enable popups}

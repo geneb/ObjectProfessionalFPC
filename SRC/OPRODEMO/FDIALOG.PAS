@@ -1,6 +1,6 @@
 {$S-,R-,V-,I-,B-,F+,O+,A-}
 
-{$I OPDEFINE.INC}
+{$I opdefine.inc}
 
 {*********************************************************}
 {*                   FDIALOG.PAS 1.30                    *}
@@ -167,7 +167,7 @@ implementation
         {$IFDEF UseScrollBars}
         with wFrame do
           AdjustFrameCoords(frXL, frYL, frXH+1, frYH);
-        wFrame.AddCustomScrollBar(frRR, 0, MaxLongInt, 0, 0, 'þ', '°', Colors);
+        wFrame.AddCustomScrollBar(frRR, 0, MaxLongInt, 0, 0, #$FE, #$B0, Colors);
         SetPadSize(1, 1);
         {$ELSE}
         SetPadSize(1, 2);

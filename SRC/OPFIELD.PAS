@@ -1,10 +1,10 @@
-{$IFDEF Windows}                                                      {!!.20}
+{$IFDEF OPWinTP}                                                      {!!.20}
   !! ERROR: This unit is not compatible with Windows applications !!  {!!.20}
 {$ENDIF}                                                              {!!.20}
 
 {$S-,R-,V-,I-,B-,F+,O+,A-}
 
-{$I OPDEFINE.INC}
+{$I opdefine.inc}
 
 {*********************************************************}
 {*                   OPFIELD.PAS 1.30                    *}
@@ -79,7 +79,7 @@ const
   efShowReadChar     = $10000000; {display the character pressed?}
   efHideCursor       = $20000000; {hide cursor?}
   efDefaultAccepted  = $40000000; {allow user to accept default?}
-  efMapExtended      = $80000000; {map extended keys?}
+  efMapExtended      = Low(LongInt); {was $80000000} {map extended keys?}
 
   DefEFieldOptions   : LongInt = efInsertPushes+efAutoAdvance+efTrimBlanks+
                                  efMapCtrls+efAllowEscape+efDefaultAccepted+
@@ -97,7 +97,7 @@ const
   sefNoFieldMovement = $20000000; {don't allow field movement commands to exit}
   {...following options used by line editors only...}
   sefWindowRelative  = $40000000; {coordinates treated relative to current window?}
-  sefInsertByDefault = $80000000; {default to insert mode?}
+  sefInsertByDefault = Low(LongInt); {default to insert mode?}
 
   DefPadChar         : Char = ' '; {character used to pad strings}
   DefPasswordChar    : Char = ^G;
@@ -1092,11 +1092,11 @@ implementation
 uses
   OpFEdit;
 
-  {$I OPFIELD.IN1}  {misc., TextFields, SelectFields, EntryFields}
-  {$I OPFIELD.IN2}  {descendents of EntryFields}
-  {$I OPFIELD.IN3}  {multiple choice fields, multi-line fields}
-  {$I OPFIELD.IN4}  {drawing, validation, and conversion routines}
-  {$I OPFIELD.IN5}  {stream registration routines}
+  {$I opfield.in1}  {misc., TextFields, SelectFields, EntryFields}
+  {$I opfield.in2}  {descendents of EntryFields}
+  {$I opfield.in3}  {multiple choice fields, multi-line fields}
+  {$I opfield.in4}  {drawing, validation, and conversion routines}
+  {$I opfield.in5}  {stream registration routines}
 
 {$IFDEF InitAllUnits}
 begin

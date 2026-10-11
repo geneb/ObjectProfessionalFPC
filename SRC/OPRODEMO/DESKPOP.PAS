@@ -1,4 +1,4 @@
-{$IFDEF Windows}
+{$IFDEF OPWinTP}
   !! This program is not compatible with Windows !!
 {$ENDIF}
 
@@ -13,6 +13,11 @@
                              will be compiled as a non-resident program. The
                              state of this define MUST agree with the
                              identically named define in DESKMAIN.PAS}
+
+{FPC port: no TSR possible; always build the non-resident version}
+{$IFDEF FPC}
+  {$DEFINE NoPop}
+{$ENDIF}
 
 {*********************************************************}
 {*                  DESKPOP.PAS 1.30                     *}

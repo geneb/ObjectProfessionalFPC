@@ -9,7 +9,7 @@
 {*                 All rights reserved.                  *}
 {*********************************************************}
 
-{$I OPDEFINE.INC}
+{$I opdefine.inc}
 
 {***************************************************************************
  This program requires that OPDEFINE.INC activate the following defines:
@@ -73,7 +73,7 @@ const
     SelXrefColor         : $5F; SelXrefMono         : $70;
     MouseColor           : $4F; MouseMono           : $70
   );
-  SinWindowFrame : FrameArray = 'ÚÀ¿ÙÄÄ³³';
+  SinWindowFrame : FrameArray = #$DA#$C0#$BF#$D9#$C4#$C4#$B3#$B3;
   Step           = 1;
   MaxRows        = 68;       {absolute maximum number of rows}
   MinRows        = 1;        {absolute minimum number of rows}

@@ -1335,22 +1335,22 @@
     {-Fix up one user variable pointer}
   var
     IP : IdNodePtr;
-    MinO, MaxO : Word;
   begin
     pbFixOneUserVar := False;
     if PFP = nil then
       Exit;
 
-    with PFP^, OS(pfVarPtr) do begin
+    {FPC port: the stored form packs a 16-bit "segment" (type code) and a
+     16-bit "offset" into the low 32 bits of the pointer field; real
+     pointers are handled as flat PtrUInt values}
+    with PFP^ do begin
       {is the variable within the user record?}
-      MinO := OS(pbUserRecPtr).O;
-      MaxO := MinO+pbUserRecSize-1;
       if (pbUserRecPtr <> nil) and (pbUserRecSize > 0) and
-              (S = OS(pbUserRecPtr).S) and (O >= MinO)
-              and (O <= MaxO) then begin
+              (PtrUInt(pfVarPtr) >= PtrUInt(pbUserRecPtr)) and
+              (PtrUInt(pfVarPtr) < PtrUInt(pbUserRecPtr)+pbUserRecSize) then begin
         {store ptFormUserRec as the segment, and adjust the offset}
-        S := ptFormUserRec;
-        Dec(O, MinO);
+        pfVarPtr := Pointer((PtrUInt(ptFormUserRec) shl 16) or
+                            (PtrUInt(pfVarPtr)-PtrUInt(pbUserRecPtr)));
       end
       else begin
         {is the variable's address registered?}
@@ -1359,12 +1359,10 @@
           Exit
         else with IP^ do begin
           {store the id code in the segment, the version in the offset}
-          S := idCode;
-          O := idVer;
+          pfVarPtr := Pointer((PtrUInt(idCode) shl 16) or PtrUInt(idVer));
         end;
       end;
     end;
-
     pbFixOneUserVar := True;
   end;
 
@@ -1394,27 +1392,25 @@
     if PFP = nil then
       Exit;
 
-    with PFP^, OS(pfVarPtr) do
+    with PFP^ do
       {segment has the type code}
-      if S = ptFormUserRec then
+      if ((PtrUInt(pfVarPtr) shr 16) and $FFFF) = ptFormUserRec then
         {a code of ptFormUserRec means it's part of the user record}
         if pbUserRecPtr = nil then
           {no user record set up}
           Exit
-        else begin
+        else
           {offset is relative to start of user record}
-          S := OS(pbUserRecPtr).S;
-          Inc(O, OS(pbUserRecPtr).O);
-        end
+          pfVarPtr := Pointer(PtrUInt(pbUserRecPtr)+(PtrUInt(pfVarPtr) and $FFFF))
       else begin
         {segment has the code, offset has the version}
-        IP := IdS.idRegistered.FindByCodeVer(S, O);
+        IP := IdS.idRegistered.FindByCodeVer((PtrUInt(pfVarPtr) shr 16) and $FFFF,
+                                             PtrUInt(pfVarPtr) and $FFFF);
         if IP = nil then
           Exit
         else
           pfVarPtr := IP^.StorePtr;
       end;
-
     pbRestoreOneUserVar := True;
   end;
 

@@ -40,4 +40,3 @@ begin
   {Deallocate help window}
   Dispose(H, Done);
 end.
-

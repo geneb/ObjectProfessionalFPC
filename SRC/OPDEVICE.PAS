@@ -1,12 +1,12 @@
 
-{$IFDEF Windows}                                                      {!!.20}
+{$IFDEF OPWinTP}                                                      {!!.20}
   !! ERROR: This unit is not compatible with Windows applications !!  {!!.20}
 {$ENDIF}                                                              {!!.20}
 
 {$S-,R-,V-,I-,B-,F+,O+,A-}
 
 {Conditional defines that may affect this unit}
-{$I OPDEFINE.INC}
+{$I opdefine.inc}
 
 {*********************************************************}
 {*                  OPDEVICE.PAS 1.30                    *}
@@ -512,19 +512,19 @@ implementation
 
   begin
     with P^, GetBasePrinter^ do begin
-      XlatCharItem('Ú','+');
-      XlatCharItem('À','+');
-      XlatCharItem('¿','+');
-      XlatCharItem('Ù','+');
-      XlatCharItem('Ä','-');
-      XlatCharItem('³','|');
+      XlatCharItem(#$DA,'+');
+      XlatCharItem(#$C0,'+');
+      XlatCharItem(#$BF,'+');
+      XlatCharItem(#$D9,'+');
+      XlatCharItem(#$C4,'-');
+      XlatCharItem(#$B3,'|');
 
-      XlatCharItem('É','+');
-      XlatCharItem('È','+');
-      XlatCharItem('»','+');
-      XlatCharItem('¼','+');
-      XlatCharItem('Í','-');
-      XlatCharItem('º','|');
+      XlatCharItem(#$C9,'+');
+      XlatCharItem(#$C8,'+');
+      XlatCharItem(#$BB,'+');
+      XlatCharItem(#$BC,'+');
+      XlatCharItem(#$CD,'-');
+      XlatCharItem(#$BA,'|');
     end;
   end;
 
@@ -532,19 +532,19 @@ implementation
 
   begin
     with P^, GetBasePrinter^ do begin
-      XlatCharItem('Ú',#134);
-      XlatCharItem('À',#153);
-      XlatCharItem('¿',#149);
-      XlatCharItem('Ù',#154);
-      XlatCharItem('Ä',#157);
-      XlatCharItem('³',#156);
+      XlatCharItem(#$DA,#134);
+      XlatCharItem(#$C0,#153);
+      XlatCharItem(#$BF,#149);
+      XlatCharItem(#$D9,#154);
+      XlatCharItem(#$C4,#157);
+      XlatCharItem(#$B3,#156);
 
-      XlatCharItem('É',#134);
-      XlatCharItem('È',#153);
-      XlatCharItem('»',#149);
-      XlatCharItem('¼',#154);
-      XlatCharItem('Í',#157);
-      XlatCharItem('º',#156);
+      XlatCharItem(#$C9,#134);
+      XlatCharItem(#$C8,#153);
+      XlatCharItem(#$BB,#149);
+      XlatCharItem(#$BC,#154);
+      XlatCharItem(#$CD,#157);
+      XlatCharItem(#$BA,#156);
     end;
   end;
 

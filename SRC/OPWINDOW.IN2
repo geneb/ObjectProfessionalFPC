@@ -112,8 +112,8 @@
     {-Scroll contents horizontally, leaving region past sXH unchanged}
   var
     WordsToMove : Word;
-    SrcPos : Word;
-    DestPos : Word;
+    SrcPos : LongInt;
+    DestPos : LongInt;
     Row : Word;
     XL : Byte;
     XH : Byte;
@@ -144,8 +144,8 @@
       else
         inc(DestPos, 2*Abs(Cols));
       for Row := wYL to wYH do begin
-        MoveScreen(Mem[OpCrt.VirtualSegment:SrcPos],
-                   Mem[OpCrt.VirtualSegment:DestPos],
+        MoveScreen(PByte(PtrUInt(OpCrt.VirtualBuffer)+SrcPos)^,
+                   PByte(PtrUInt(OpCrt.VirtualBuffer)+DestPos)^,
                    WordsToMove);
         Inc(SrcPos, 2*OpCrt.VirtualWidth);
         Inc(DestPos, 2*OpCrt.VirtualWidth);
@@ -177,9 +177,9 @@
     {-Scroll contents vertically}
   var
     WordsToMove : Word;
-    BytesAcross : Integer;
-    SrcPos : Word;
-    DestPos : Word;
+    BytesAcross : LongInt;
+    SrcPos : LongInt;
+    DestPos : LongInt;
     Row : Word;
     YL : Byte;
     YH : Byte;
@@ -201,7 +201,7 @@
     {Shift existing text}
     if Abs(Rows) < Height then begin
       WordsToMove := Width;
-      BytesAcross := Integer(2)*OpCrt.VirtualWidth;
+      BytesAcross := LongInt(2)*OpCrt.VirtualWidth;
       if Rows > 0 then begin
         DestPos := Word(2)*(OpCrt.VirtualWidth*(wYL-1)+(wXL-1));
         SrcPos := DestPos+BytesAcross*Rows;
@@ -211,8 +211,8 @@
         BytesAcross := -BytesAcross;
       end;
       for Row := wYL to wYH-Abs(Rows) do begin
-        MoveScreen(Mem[OpCrt.VirtualSegment:SrcPos],
-                   Mem[OpCrt.VirtualSegment:DestPos],
+        MoveScreen(PByte(PtrUInt(OpCrt.VirtualBuffer)+SrcPos)^,
+                   PByte(PtrUInt(OpCrt.VirtualBuffer)+DestPos)^,
                    WordsToMove);
         Inc(SrcPos, BytesAcross);
         Inc(DestPos, BytesAcross);
@@ -1320,20 +1320,9 @@ type
       {Avoid deallocating the list node twice}
       swPtr^.wParentPtr := nil;
       ClearLongFlag(swPtr^.wFlags, wIsChild+wActive);
-{$IFDEF Dpmi}                                                        {!!.20}
-      {we must assume it's on the heap, dispose it}                  {!!.20}
-      Dispose(swPtr, Done);                                          {!!.20}
-{$ELSE}                                                              {!!.20}
-      {Deallocate swPtr itself only if on heap}
-      if (OS(swPtr).O <= $000F) and
-  {$IFDEF Heap6}
-         ((OS(swPtr).O = $0000) or (OS(swPtr).O = $0008)) and
-  {$ENDIF}
-         (OS(swPtr).S >= OS(HeapOrg).S) then
-        Dispose(swPtr, Done)
-      else
-        swPtr^.Done;
-{$ENDIF}                                                             {!!.20}
+      {FPC port: the real-mode heap-origin test is impossible; as in the
+       protected-mode branch, assume it's on the heap and dispose it}
+      Dispose(swPtr, Done);
     end;
     SingleListNode.Done;
   end;

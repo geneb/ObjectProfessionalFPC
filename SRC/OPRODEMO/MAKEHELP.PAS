@@ -15,7 +15,7 @@
 program MakeHelp;
   {-Build indexed binary help file from text file}
 uses
-  Dos,
+  SysUtils, Dos,
   OpDos,
   OpConst,    {!!.20}
   OpRoot,
@@ -230,11 +230,8 @@ const
         Exit;
 
       {Position file pointer past last data used}
-      AX := $4201;
-      BX := Handle;
-      CX := LH(Bytes).H;
-      DX := LH(Bytes).L;
-      MsDos(Regs);
+      {FPC port: seek relative to current position}
+      SysUtils.FileSeek(Handle, Bytes, 1);
 
       {Mark buffer empty}
       BufPos := 0;
@@ -786,21 +783,17 @@ const
 
   function TranslateIndex(Ch : Char) : Byte;
     {-If Ch is in translate table, return index, else return $0F}
-  inline
-  ($8C/$D8/                  {mov ax,ds}
-    $8E/$C0/                 {mov es,ax}
-    $BF/>TranslateTable/     {mov di,>TranslateTable  ;es:di -> TranslateTable}
-    $89/$FE/                 {mov si,di               ;save start offset}
-    $58/                     {pop ax                  ;al = Ch}
-    $B9/>MaxCompIndex+1/     {mov cx,>MaxCompIndex+1  ;cx = bytes to scan}
-    $FC/                     {cld                     ;forward}
-    $F2/                     {repne                   ;search}
-    $AE/                     {scasb                   ;  until match}
-    $75/$01/                 {jne fail                ;jump if not found}
-    $4F/                     {dec di                  ;point to match if found}
-    {fail:}
-    $29/$F7/                 {sub di,si               ;compute index of match}
-    $89/$F8);                {mov ax,di               ;return index in al}
+  var
+    I : Word;
+  begin
+    {FPC port: replaces the REPNE SCASB inline routine}
+    for I := 0 to MaxCompIndex do
+      if TranslateTable[I] = Byte(Ch) then begin
+        TranslateIndex := I;
+        Exit;
+      end;
+    TranslateIndex := MaxCompIndex+1;
+  end;
 
   procedure FlushBuffer;
     {-Write the output buffer to file}
@@ -1180,8 +1173,15 @@ const
     {-Sort the topic map into alphabetical order}
   const
     SortMsg = 'Sorting .';
+  {FPC port: BIOS tick count (40:6C) replaced by a clock-derived 18.2 Hz count}
+  function BiosTicks : LongInt;
   var
-    BiosTicks : LongInt absolute $40:$6C; {BIOS time}
+    H, M, S, S100 : Word;
+  begin
+    GetTime(H, M, S, S100);
+    BiosTicks := ((LongInt(H)*3600+M*60+S)*182+S100*182 div 100) div 10;
+  end;
+  var
     StartTime : LongInt;
     Dots : Word;
     I : Word;

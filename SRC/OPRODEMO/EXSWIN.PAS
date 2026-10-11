@@ -46,4 +46,3 @@ begin
   {Deallocate the window stack}
   wStack.Done;
 end.
-

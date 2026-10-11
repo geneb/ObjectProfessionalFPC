@@ -2,23 +2,15 @@ ignorecase = true
 # don't want to include any of the build artifacts or
 # IDE config (.cfg) files.
 
-src/*.tpu
-src/*.tpp
-src/*.obj
+src/*.ppu
+src/*.o
 src/*.exe
-src/*.com
+out/
 #
-src/tpc.cfg
-src/bpc.cfg
-src/oprodemo/*.tpu
+src/oprodemo/*.pp
+src/oprodemo/*.o
 src/oprodemo/*.exe
-src/oprodemo/*.obj
 #
 src/oprodemo/*.tpp
-src/oprodemo/tpc.cfg
-src/prodemo/bpc.cfg
 #
-src/oproobj/*.obj
-src/oproobj/*.cfg
-src/oproobj/tpc.cfg
-src/oproobj/bpc.cfg
+src/oproobj/*.o

@@ -1,10 +1,10 @@
-{$IFDEF Windows}
+{$IFDEF OPWinTP}
   !! ERROR - This unit is not compatible with Windows !!
 {$ENDIF}
 
 {$R-,S-,I-,V-,B-,F+,O+,A-} {!!.01}
 
-{$I OPDEFINE.INC}
+{$I opdefine.inc}
 
 {*********************************************************}
 {*                  OPCALC.PAS 1.30                      *}
@@ -38,7 +38,7 @@ uses
   {$ENDIF}             {!!.03}
   ;
 
-  {$I OPCALC.ICD}  {configuration data}
+  {$I opcalc.icd}  {configuration data}
 
 const
   {option codes}
@@ -46,9 +46,9 @@ const
 
   DefCalcOptions : Byte = 0;
 
-  DefCrossBar : Char = 'Ä';
-  DefLeftTee  : Char = 'Ã';
-  DefRightTee : Char = '´';
+  DefCrossBar : Char = #$C4;
+  DefLeftTee  : Char = #$C3;
+  DefRightTee : Char = #$B4;
 
   CalculatorWidth  = 43;     {width of calculator window}
   CalculatorHeight = 8;      {height of inner calculator window}
@@ -194,7 +194,7 @@ const
   ModeStrings : array[CalcMode] of string[7] =
   ('  Dec  ', '  Hex  ', '  Bin  ', ' Float ', '  Exp  ');
   CalcChars : array[CalcType] of string[3] =
-  ('   ', '+  ', '-  ', '*  ', 'ö  ', 'and', 'mod', 'not', 'or ', 'xor',
+  ('   ', '+  ', '-  ', '*  ', #$F6'  ', 'and', 'mod', 'not', 'or ', 'xor',
     'shl', 'shr');
   DoneChars : array[Boolean] of string[1] = (' ', '=');
   HighDigit :                {highest digit allowed in given CalcMode}
@@ -1169,6 +1169,9 @@ const
     NumLockBit = $20;
   var
     KeyboardFlags : ^Byte; {absolute $40 : $17;}                        {!!.20}
+    { FPC port: BIOS keyboard flags byte ($40:$17) does not exist; a private
+      dummy byte is used so NumLock forcing is a harmless no-op }
+    DummyKbdFlags : Byte;
     SaveNumLock : Boolean;
     Ch : Char absolute cwKey;
     SaveInt0 : Pointer;
@@ -1196,7 +1199,8 @@ const
     SetIntVec(0, @Int0Handler);
 
     {save NumLock state and force it on}
-    KeyboardFlags := Ptr(BiosDataSele, $17);                          {!!.20}
+    DummyKbdFlags := 0;
+    KeyboardFlags := @DummyKbdFlags;  { FPC port: stubbed, no BIOS data area }
     SaveNumLock := ByteFlagIsSet(KeyboardFlags^, NumLockBit);         {!!.20}
     SetByteFlag(KeyboardFlags^, NumLockBit);                          {!!.20}
 

@@ -1,11 +1,11 @@
-{$IFDEF Windows}                                                      {!!.20}
+{$IFDEF OPWinTP}                                                      {!!.20}
   !! ERROR: This unit is not compatible with Windows applications !!  {!!.20}
 {$ENDIF}                                                              {!!.20}
 
 {$R-,S-,I-,V-,B-,F+,O+,A-}
 
 {Conditional defines that may affect this unit}
-{$I OPDEFINE.INC}
+{$I opdefine.inc}
 
 {*********************************************************}
 {*                    OPDIR.PAS 1.30                     *}
@@ -340,11 +340,11 @@ const
   BadPathOptions    : Word = paReadDir+paFullPathDisp+paUpdating;
 
   {---- Index to characters used for line drawing ----}
-  paTee             = 1;          {Â}
-  paPipe            = 2;          {³}
-  paArrow           = 3;          {Ã}
-  paBar             = 4;          {Ä}
-  paEll             = 5;          {À}
+  paTee             = 1;          {?}
+  paPipe            = 2;          {?}
+  paArrow           = 3;          {?}
+  paBar             = 4;          {?}
+  paEll             = 5;          {?}
 
 type
   PathDrawArray     = array[paTee..paEll] of Char;
@@ -458,9 +458,9 @@ type
     end;
 
 const
-  paSingleDraw      : PathDrawArray = 'Â³ÃÄÀ';
+  paSingleDraw      : PathDrawArray = #$C2#$B3#$C3#$C4#$C0;
 const
-  paDoubleDraw      : PathDrawArray = 'ËºÌÍÈ';
+  paDoubleDraw      : PathDrawArray = #$CB#$BA#$CC#$CD#$C8;
 
 {.F+}
 
@@ -571,9 +571,40 @@ implementation
 var
   Pivot : DirRec;                 {Temporary storage for sort pivot}
 
-  {$I OPDIR.IN1}                  {Low level routines}
-  {$I OPDIR.IN2}                  {DirList}
-  {$I OPDIR.IN3}                  {PathList}
+  { FPC port: file names are case-insensitive on Windows but case-sensitive
+    on Unix, so they must only be raised to uppercase on Windows }
+  function FsUp(S : string) : string;
+  begin
+{$IFDEF UNIX}
+    FsUp := S;
+{$ELSE}
+    FsUp := StUpcase(S);
+{$ENDIF}
+  end;
+
+  function IsDirSep(Ch : Char) : Boolean;
+    {-True for a path separator on this OS}
+  begin
+{$IFDEF UNIX}
+    IsDirSep := (Ch = '/');
+{$ELSE}
+    IsDirSep := (Ch = '\') or (Ch = '/');
+{$ENDIF}
+  end;
+
+  function RootLen : Byte;
+    {-Length of a root directory path ('C:\' or '/')}
+  begin
+{$IFDEF UNIX}
+    RootLen := 1;
+{$ELSE}
+    RootLen := 3;
+{$ENDIF}
+  end;
+
+  {$I opdir.in1}                  {Low level routines}
+  {$I opdir.in2}                  {DirList}
+  {$I opdir.in3}                  {PathList}
 
 {$IFDEF InitAllUnits}
 begin

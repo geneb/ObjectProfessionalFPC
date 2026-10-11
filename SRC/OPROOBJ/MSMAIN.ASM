@@ -90,4 +90,3 @@ GetPicture      ENDP
 CODE    ENDS
 
         END
-

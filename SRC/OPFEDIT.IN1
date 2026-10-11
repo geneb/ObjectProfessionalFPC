@@ -255,9 +255,9 @@
         Redraw(True);
 
         {get next command}
-        ExchangeLongInts(LongInt(StPtr), LongInt(efEditSt));
+        ExchangeStructs(StPtr, efEditSt, SizeOf(Pointer));
         CC := CP.GetCommand(ChWord);
-        ExchangeLongInts(LongInt(StPtr), LongInt(efEditSt));
+        ExchangeStructs(StPtr, efEditSt, SizeOf(Pointer));
 
         {don't allow ccIncChoice, ccDecChoice, or ccToggle}
         case CC of

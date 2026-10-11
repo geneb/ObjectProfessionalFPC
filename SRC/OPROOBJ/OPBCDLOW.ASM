@@ -70,4 +70,3 @@ SignsOnly       =       1000000010000000b
 HighNibble      =       11110000b               ;bit mask for high nibble
 LowNibble       =       00001111b               ;bit mask for low nibble
 AsciizLength    =       127
-

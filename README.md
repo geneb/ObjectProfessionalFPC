@@ -23,22 +23,13 @@ I owned a copy of Object Professional that I used back in the mid 90's and after
 From what I can determine, v1.30 is the last version of Object Professional that was released by TurboPower.
 
 ## Building
-Object Professional can be built using Turbo Pascal versions 5.5 to 7.0, and Borland Pascal v7.0.  In the case of Borland Pascal 7.0, units can be built for both real mode (TPU) and protected mode (TPP).  The build process also requires Turbo Assembler v1.0 or greater, or Microsoft Assembler v4.0 or greater in order to assemble the .ASM files.  You'll need to ensure that your build tools are in your DOS path.
+This port builds with Free Pascal 3.2.2 (`fpc`) on Windows and Linux; no assembler is needed (the .ASM routines were ported to Pascal).  Everything is compiled with `-Mtp -Sg`.
+
+From the SRC directory run `build.cmd` (Windows) or `./build.sh` (Linux; `make` also works).  An optional output directory may be given as an argument; the default is `out\win64` / `out/x86_64-<os>`, with units in `units` and the demo programs in `bin`.  Builds are **64-bit (x86_64) by default**; set `CPU=i386` for a 32-bit build (output `out\win32`). Set the `FPC` environment variable to use a specific compiler. (`MemOpLibrary` is not available in this port.)
 
 The file SRC\OPDEFINE.INC has settings that can be changed in order to affect how Object Professional is built and functions.  It would be worth your time to peruse that file - note that unless you know **why** you're going to change something, you probably should leave it the default.
 
-The Makefile for Object Professional can be found in SRC\OPRO.MAK.  This file will allow you to adjust a number of different things about how the units are built.  I recommend going through it - the settings it uses are very well documented.  Note that the Makefile uses the Borland Make syntax.
-
-There are three directory assignments in the Makefile that you'll need to change:
-
-* asmdir - the location of the assembly code files.  
-* tpudir - the location of the Turbo Pascal source code.
-* demodir - the location of the Turbo Pascal source code for the demos.
-
-The directory assignments must be full paths - relative paths confuses Borland's make program.
-
-Change to the SRC directory and kick off the build with `make -fopro`.  This will build all the units, all the object files, compile the help files, and build all the examples.  Copy all the TPU and/or TPP unit files to some location that you can easily point the compiler's Unit Directory setting at.  You're done!
-
+Features that cannot exist in a 32-bit portable build are stubbed and marked with `{ FPC port: ... }` comments: EMS, XMS, DPMI, TSR/pop-up support and interrupt hooks, direct BIOS data area access, and direct UART/video hardware access.  The TSR demos (SMACS, DESKPOP, PHMAIN/POPHELP, PTIME, PSMAIN, ...) build and run only as normal foreground programs, or print a message that they need MS-DOS TSR facilities.  The old DOS Makefile (SRC\OPRO.MAK) is kept for reference only.
 ## Documentation
 
 The Object Professional documentation is spread across three volumes:

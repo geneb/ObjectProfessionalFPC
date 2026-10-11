@@ -294,36 +294,20 @@
     {-Return hash of S}
   var
     Sum : Word;
+    I : Word;
+    Ch : Byte;
   begin
-    Inline(
-      $1E/                   {  PUSH    DS}
-      $C5/$76/<S/            {  LDS     SI,[BP+<S]   ;DS:SI -> St}
-      $FC/                   {  CLD                  ;go forward}
-      $AC/                   {  LODSB                ;AL = Length(St)}
-      $30/$E4/               {  XOR     AH,AH        ;zero AH,BH,CH}
-      $88/$E5/               {  MOV     CH,AH}
-      $88/$E7/               {  MOV     BH,AH}
-      $88/$C1/               {  MOV     CL,AL        ;CX = Length(St)}
-      $88/$C3/               {  MOV     BL,AL        ;BX to contain Hash}
-      $E3/$1A/               {  JCXZ    Done         ;done if CX is 0}
-                             {Next:}
-      $AC/                   {  LODSB                ;next char into AL}
-      $3C/$61/               {  CMP     AL,'a'       ;uppercase it}
-      $72/$06/               {  JB      NoUpcase}
-      $3C/$7A/               {  CMP     AL,'z'}
-      $77/$02/               {  JA      NoUpcase}
-      $2C/$20/               {  SUB     AL,$20}
-                             {NoUpcase:}
-      $30/$C7/               {  XOR     BH,AL        ;hash high byte}
-      $88/$CA/               {  MOV     DL,CL        ;save CL}
-      $80/$E1/$03/           {  AND     CL,3         ;pseudo-random SHL 0-3}
-      $D3/$E0/               {  SHL     AX,CL        ;shift left}
-      $01/$C3/               {  ADD     BX,AX        ;add to hash}
-      $88/$D1/               {  MOV     CL,DL        ;restore count in CX}
-      $E2/$E6/               {  LOOP    Next         ;repeat}
-                             {Done:}
-      $1F/                   {  POP     DS           ;restore DS}
-      $89/$5E/<SUM);         {  MOV     [BP+<Sum],BX ;store sum}
+    {Pascal port of the original assembly: the high byte accumulates an xor of
+     the upcased characters, the sum adds each character shifted by
+     (remaining count and 3)}
+    Sum := Length(S);
+    for I := 1 to Length(S) do begin
+      Ch := Ord(S[I]);
+      if (Ch >= Ord('a')) and (Ch <= Ord('z')) then
+        Ch := Ch-$20;
+      Sum := Sum xor (Word(Ch) shl 8);
+      Sum := Word(Sum + (Word(Ch) shl ((Length(S)-I+1) and 3)));
+    end;
     Hash := Sum and (sdSize-1);
   end;
 (* previous version
@@ -597,10 +581,10 @@
   function GetMemCheck(var P; Bytes : Word) : Boolean;
     {-Allocate heap space, returning true if successful}
   var
-    Pt : LongInt absolute P;             {!!.20}
+    Pt : Pointer absolute P;
   begin
-    GetMem(Pointer(Pt), Bytes);          {!!.20}
-    GetMemCheck := (Pt <> 0);            {!!.20}
+    GetMem(Pt, Bytes);
+    GetMemCheck := (Pt <> nil);
   end;
 
 {$IFDEF Debug}
@@ -665,7 +649,7 @@ const
   FlushModeWrite = 1;
   FlushModeBoth = 2;
 
-  constructor IdNode.Init(Code, Ver, Vmt : Word; Store, Load : Pointer);
+  constructor IdNode.Init(Code, Ver : Word; Vmt : PtrUInt; Store, Load : Pointer);
     {-Initialize an IdNode}
   begin
     idNext := nil;
@@ -741,7 +725,7 @@ const
     Next := P^.idNext;
   end;
 
-  function IdList.FindByVmt(Vmt : Word) : IdNodePtr;
+  function IdList.FindByVmt(Vmt : PtrUInt) : IdNodePtr;
     {-Return pointer to matching IdNode, nil for none. Used by Put}
   var
     I : IdNodePtr;
@@ -758,7 +742,7 @@ const
     FindByVmt := nil;
   end;
 
-  function IdList.FindByVmtVer(Vmt, Ver : Word) : IdNodePtr;
+  function IdList.FindByVmtVer(Vmt : PtrUInt; Ver : Word) : IdNodePtr;
     {-Return pointer to matching IdNode, nil for none. Used by TypeVerRegistered}
   var
     I : IdNodePtr;
@@ -809,7 +793,7 @@ const
     FindByCodeVer := nil;
   end;
 
-  function IdList.Add(Code, Ver, Vmt : Word; StoreP, LoadP : Pointer) : Word;
+  function IdList.Add(Code, Ver : Word; Vmt : PtrUInt; StoreP, LoadP : Pointer) : Word;
     {-Add new Id to list, returning zero for success, non-zero for error}
   var
     I : IdNodePtr;
@@ -969,7 +953,7 @@ const
       {Version PtrVersion is reserved for registering pointers in general}
       Error(epNonFatal+ecIdRegisteredDup)
     else begin
-      S := idRegistered.Add(Code, Version, OS(TypePtr).O, StorePtr, LoadPtr);
+      S := idRegistered.Add(Code, Version, PtrUInt(TypePtr), StorePtr, LoadPtr);
       if S <> 0 then
         Error(S);
     end;
@@ -985,13 +969,13 @@ const
   function IdStream.TypeRegistered(TypePtr : Pointer) : Boolean;
     {-Return True if specified type is registered for store *and* load}
   begin
-    TypeRegistered := (idRegistered.FindByVmt(OS(TypePtr).O) <> nil);
+    TypeRegistered := (idRegistered.FindByVmt(PtrUInt(TypePtr)) <> nil);
   end;
 
   function IdStream.TypeVerRegistered(TypePtr : Pointer; Version : Word) : Boolean;
     {-Return True if specified type and version is registered for load}
   begin
-    TypeVerRegistered := (idRegistered.FindByVmtVer(OS(TypePtr).O, Version) <> nil);
+    TypeVerRegistered := (idRegistered.FindByVmtVer(PtrUInt(TypePtr), Version) <> nil);
   end;
 
   function IdStream.CodeVerRegistered(Code, Version : Word) : Boolean;
@@ -1006,12 +990,18 @@ const
     RProc(@Self);
   end;
 
+  type
+    {Registered Store method called with explicit Self}
+    StoreProc = procedure(Obj : Pointer; var S : IdStream);
+    {Registered Load constructor called with explicit Self and VMT}
+    LoadProc = function(Obj, VmtParam : Pointer; var S : IdStream) : Pointer;
+
   procedure IdStream.PutPtr(RPtr : RootPtr);
     {-Calls registered Store method to write object RPtr^ to disk}
   var
     Code : Word;
     Ver : Word;
-    Vmt : Word;
+    Vmt : PtrUInt;
     I : IdNodePtr;
     Store : Pointer;
   begin
@@ -1024,9 +1014,9 @@ const
       Ver :=PtrVersion;
 
     end else begin
-      I := idRegistered.FindByVmt(Word(RPtr^)); {<-- counts on VMT in first word}
+      I := idRegistered.FindByVmt(PtrUInt(TypeOf(RPtr^))); {<-- counts on VMT in first word}
       if I = nil then begin
-        idVmtError := Word(RPtr^); {!!.03}
+        idVmtError := PtrUInt(TypeOf(RPtr^)); {!!.03}
         Error(epNonFatal+ecIdNotRegistered);
         Exit;
       end;
@@ -1046,12 +1036,7 @@ const
 
     {Call the object store routine if available}
     if RPtr <> nil then
-      Inline(
-        $FF/$76/<Self+2/ {push word ptr [bp+<Self+2] ;push segment of Stream}
-        $FF/$76/<Self/   {push word ptr [bp+<Self]   ;push offset of Stream}
-        $FF/$76/<RPtr+2/ {push word ptr [bp+<RPtr+2] ;push segment of RPtr}
-        $FF/$76/<RPtr/   {push word ptr [bp+<RPtr]   ;push offset of RPtr}
-        $FF/$5E/<Store); {call far [bp+<Store]       ;call Store routine}
+        StoreProc(Store)(RPtr, Self);
   end;
 
   procedure IdStream.Put(var R : Root);
@@ -1065,7 +1050,7 @@ const
   var
     Code : Word;
     Ver : Word;
-    Vmt : Word;
+    Vmt : PtrUInt;
     I : IdNodePtr;
     Load : Pointer;
   begin
@@ -1092,15 +1077,10 @@ const
     {Call the registered load constructor}
     {If NewSelf is nil, constructor will dynamically allocate instance}
     {Otherwise it treats NewSelf as a static instance}
-    Inline(
-      $FF/$76/<Self+2/     {push word ptr [bp+<Self+2];segment of stream}
-      $FF/$76/<Self/       {push word ptr [bp+<Self]  ;offset of stream}
-      $FF/$76/<Vmt/        {push word ptr [bp+<Vmt]   ;VMT offset of object type}
-      $FF/$76/<NewSelf+2/  {push word ptr [bp+<NewSelf+2] ;segment of new self}
-      $FF/$76/<NewSelf/    {push word ptr [bp+<NewSelf]   ;offset of new self}
-      $FF/$5E/<Load/       {call far [bp+<Load]       ;call Load constructor}
-      $89/$46/<NewSelf/    {mov [bp+<NewSelf],ax      ;store pointer returned by constructor}
-      $89/$56/<NewSelf+2); {mov [bp+<NewSelf+2],dx}
+    if NewSelf = nil then
+      NewSelf := LoadProc(Load)(nil, Pointer(Vmt), Self)
+    else
+      NewSelf := LoadProc(Load)(NewSelf, nil, Self);
 
     if (NewSelf = nil) and (idStatus = 0) then
       Error(epNonFatal+ecLoadFailed);
@@ -1254,139 +1234,107 @@ const
   end;
 
   procedure DosIdStream.Read(var Buf; Count : Word);
-    {-Read bytes from DOS file}
+    {-Read bytes from file}
   var
-    Regs : Registers;
+    Got : LongInt;
   begin
     if Count = 0 then
       Exit;
-    if idStatus = 0 then
-      with Regs do begin
-        AH := $3F;
-        BX := Handle;
-        CX := Count;
-        DX := Ofs(Buf);
-        DS := Seg(Buf);
-        MsDos(Regs);
-        if Odd(Flags) then
-          Error(epNonFatal+AX)
-        else if (AX <> CX) then
-          Error(epNonFatal+ecDiskRead)
-        else
-          Exit;
-      end;
+    if idStatus = 0 then begin
+      {FPC port: DOS INT 21h/3Fh replaced by SysUtils.FileRead}
+      Got := SysUtils.FileRead(Handle, Buf, Count);
+      if Got < 0 then
+        Error(epNonFatal+ecDiskRead)
+      else if Got <> Count then
+        Error(epNonFatal+ecDiskRead)
+      else
+        Exit;
+    end;
     FillChar(Buf, Count, 0);
   end;
 
   procedure DosIdStream.Write(var Buf; Count : Word);
-    {-Write bytes to DOS file}
+    {-Write bytes to file}
   var
-    Regs : Registers;
+    Wrote : LongInt;
   begin
-    if idStatus = 0 then
-      with Regs do begin
-        AH := $40;
-        BX := Handle;
-        CX := Count;
-        DX := Ofs(Buf);
-        DS := Seg(Buf);
-        MsDos(Regs);
-        if Odd(Flags) then
-          Error(epNonFatal+AX)
-        else if AX <> CX then
-          Error(epNonFatal+ecDiskFull);
-      end;
+    if idStatus = 0 then begin
+      {FPC port: DOS INT 21h/40h replaced by SysUtils.FileWrite}
+      Wrote := SysUtils.FileWrite(Handle, Buf, Count);
+      if Wrote <> Count then
+        Error(epNonFatal+ecDiskFull);
+    end;
   end;
 
   procedure DosIdStream.Truncate;
     {-Truncate file at current position}
   var
-    Regs : Registers;
+    P : LongInt;
   begin
     Flush;
-    if idStatus = 0 then
-      with Regs do begin
-        AH := $40;
-        BX := Handle;
-        CX := 0;
-        MsDos(Regs);
-        if Odd(Flags) then
-          Error(epNonFatal+AX);
-      end;
+    if idStatus = 0 then begin
+      P := SysUtils.FileSeek(Handle, 0, 1);
+      if (P < 0) or not SysUtils.FileTruncate(Handle, P) then
+        Error(epNonFatal+ecDiskFull);
+    end;
   end;
 
   function DosIdStream.GetPos : Longint;
     {-Return current stream position}
   var
-    Regs : Registers;
+    P : LongInt;
   begin
     GetPos := -1;
-    if idStatus = 0 then
-      with Regs do begin
-        AX := $4201;
-        BX := Handle;
-        CX := 0;
-        DX := 0;
-        MsDos(Regs);
-        if Odd(Flags) then
-          Error(epNonFatal+AX)
-        else
-          GetPos := MakeLongInt(DX, AX);
-      end;
+    if idStatus = 0 then begin
+      P := SysUtils.FileSeek(Handle, 0, 1);
+      if P < 0 then
+        Error(epNonFatal+ecDiskRead)
+      else
+        GetPos := P;
+    end;
   end;
 
   procedure DosIdStream.SetPos(Pos : Longint; Mode : Byte);
     {-Set stream position according to Mode}
-  var
-    Regs : Registers;
   begin
     Flush;
     if idStatus = 0 then
-      with Regs do begin
-        AH := $42;
-        AL := Mode;
-        BX := Handle;
-        CX := LH(Pos).H;
-        DX := LH(Pos).L;
-        MsDos(Regs);
-        if Odd(Flags) then
-          Error(epNonFatal+AX);
-      end;
+      if SysUtils.FileSeek(Handle, Pos, Mode) < 0 then
+        Error(epNonFatal+ecDiskRead);
   end;
 
   procedure DosIdStream.Close;
-    {-Close DOS file}
-  var
-    Regs : Registers;
+    {-Close file}
   begin
     Flush;
-    if idStatus = 0 then
-      with Regs do begin
-        AH := $3E;
-        BX := Handle;
-        MsDos(Regs);
-        if Odd(Flags) then
-          Error(epNonFatal+AX);
-      end;
+    if idStatus = 0 then begin
+      SysUtils.FileClose(Handle);
+      Handle := InvalidFileHandle;
+    end;
   end;
 
   procedure DosIdStream.Open(var Name; Mode : Word);
-    {-Open DOS file}
+    {-Open file. Name is an ASCIIZ file name, Mode is one of SCreate, SOpenRead,
+     SOpenWrite or SOpen}
   var
-    Regs : Registers;
+    H : THandle;
+    FName : String;
   begin
-    with Regs do begin
-      AX := Mode;
-      CX := 0;
-      DX := Ofs(Name);
-      DS := Seg(Name);
-      MsDos(Regs);
-      if Odd(Flags) then begin
-        Error(epNonFatal+AX);
-        Handle := $FFFF;
-      end else
-        Handle := AX;
+    {FPC port: DOS INT 21h open/create replaced by SysUtils.FileOpen/FileCreate}
+    FName := StrPas(PChar(@Name));
+    if Mode = SCreate then
+      H := SysUtils.FileCreate(FName)
+    else case Mode and 3 of
+      0 : H := SysUtils.FileOpen(FName, fmOpenRead or fmShareDenyNone);
+      1 : H := SysUtils.FileOpen(FName, fmOpenWrite or fmShareDenyNone);
+    else
+      H := SysUtils.FileOpen(FName, fmOpenReadWrite or fmShareDenyNone);
     end;
+    if H = InvalidFileHandle then begin
+      Error(epNonFatal+2);
+      Handle := InvalidFileHandle;
+    end else
+      Handle := H;
   end;
 
   {---------------------------------------------------------------------}
@@ -1427,7 +1375,6 @@ const
     {-Flush buffer for read, write, or both}
   var
     Bytes : LongInt;
-    Regs : Registers;
   begin
     FlushBuffer := True;
     Bytes := LongInt(BufPtr)-BufEnd;
@@ -1438,28 +1385,15 @@ const
       Exit;
     end;
 
-    with Regs do begin
-      BX := Handle;
-      if (Bytes > 0) and (FlushMode <> FlushModeRead) then begin
-        {Write data from buffer to disk}
-        AH := $40;
-        CX := LH(Bytes).L;
-        DX := OS(Buffer).O;
-        DS := OS(Buffer).S;
-        MsDos(Regs);
-        if Odd(Flags) then
-          Error(epNonFatal+AX)
-        else if AX <> CX then
-          Error(epNonFatal+ecDiskFull);
-      end else if (Bytes < 0) and (FlushMode <> FlushModeWrite) then begin
-        {Purge data in buffer by seeking just beyond what has been used}
-        AX := $4201;         {Reverse seek relative to current position}
-        DX := LH(Bytes).L;
-        CX := LH(Bytes).H;
-        MsDos(Regs);
-      end else
-        Exit;
-    end;
+    if (Bytes > 0) and (FlushMode <> FlushModeRead) then begin
+      {Write data from buffer to disk}
+      if SysUtils.FileWrite(Handle, Buffer^, Bytes) <> Bytes then
+        Error(epNonFatal+ecDiskFull);
+    end else if (Bytes < 0) and (FlushMode <> FlushModeWrite) then begin
+      {Purge data in buffer by seeking just beyond what has been used}
+      SysUtils.FileSeek(Handle, Bytes, 1);
+    end else
+      Exit;
 
     {Buffer is empty now}
     BufPtr := 0;
@@ -1497,7 +1431,7 @@ const
     UserBuf : ByteArray absolute Buf;
     UserPos : Word;
     Bytes : Word;
-    Regs : Registers;
+    Got : LongInt;
   begin
     if idStatus <> 0 then
       goto ErrorExit;
@@ -1513,20 +1447,15 @@ const
     while Count > 0 do begin
       if BufPtr >= BufEnd then
         {Refill buffer}
-        with Regs do begin
-          AH := $3F;
-          BX := Handle;
-          CX := BufSize;
-          DX := OS(Buffer).O;
-          DS := OS(Buffer).S;
-          MsDos(Regs);
-          if Odd(Flags) then begin
-            Error(epNonFatal+AX);
+        begin
+          Got := SysUtils.FileRead(Handle, Buffer^, BufSize);
+          if Got < 0 then begin
+            Error(epNonFatal+ecDiskRead);
             goto ErrorExit;
           end;
           BufPtr := 0;
-          BufEnd := AX;
-          if AX = 0 then begin
+          BufEnd := Got;
+          if Got = 0 then begin
             Error(epNonFatal+ecDiskRead);
             goto ErrorExit;
           end;
@@ -1558,7 +1487,6 @@ ErrorExit:
     UserBuf : ByteArray absolute Buf;
     UserPos : Word;
     Bytes : Word;
-    Regs : Registers;
   begin
     if idStatus <> 0 then
       Exit;

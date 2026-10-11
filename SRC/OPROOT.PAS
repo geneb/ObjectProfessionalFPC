@@ -2,7 +2,7 @@
 {!!.21 overlays allowed}
 
 {Conditional defines that may affect this unit}
-{$I OPDEFINE.INC}
+{$I opdefine.inc}
 {.$DEFINE Debug}
 
 {*********************************************************}
@@ -53,6 +53,7 @@ const
   PosEnd     = 2;               {Relative to end}
 
   {Reserved version number codes for ID streams}
+  InvalidFileHandle = THandle(-1);   {FPC port: handle value for no open file}
   PtrVersion      = $FFFF;      {Special version code used for storing pointers}
 
 type
@@ -65,13 +66,13 @@ type
       idNext   : IdNodePtr;       {Pointer to next node in list}
       idCode   : Word;            {Code associated with type}
       idVer    : Word;            {Version of type, PtrVersion for pointer}
-      idVmt    : Word;            {Offset of VMT in DS, PtrVersion for pointer}
+      idVmt    : PtrUInt;            {Offset of VMT in DS, PtrVersion for pointer}
       StorePtr : Pointer;         {@Method to write object to IdStream,
                                    or pointer}
       LoadPtr  : Pointer;         {@Constructor to read object from IdStream}
 
       {.Z+}
-      constructor Init(Code, Ver, Vmt : Word; Store, Load : Pointer);
+      constructor Init(Code, Ver : Word; Vmt : PtrUInt; Store, Load : Pointer);
         {-Initialize an IdNode}
       {.Z-}
     end;
@@ -92,15 +93,15 @@ type
         {-Return pointer to tail of list}
       function Next(P : IdNodePtr) : IdNodePtr;
         {-Returns a pointer to the next node}
-      function FindByVmt(Vmt : Word) : IdNodePtr;
+      function FindByVmt(Vmt : PtrUInt) : IdNodePtr;
         {-Return pointer to matching IdNode, nil for none. Used by Put}
-      function FindByVmtVer(Vmt, Ver : Word) : IdNodePtr;
+      function FindByVmtVer(Vmt : PtrUInt; Ver : Word) : IdNodePtr;
         {-Return pointer to matching IdNode, nil for none. Used by Put}
       function FindPointer(Ptr : Pointer) : IdNodePtr;
         {-Return pointer to matching IdNode, nil for none. Used by Put}
       function FindByCodeVer(Code, Ver : Word) : IdNodePtr;
         {-Return pointer to matching IdNode, nil for none. Used by Get}
-      function Add(Code, Ver, Vmt : Word; StoreP, LoadP : Pointer) : Word;
+      function Add(Code, Ver : Word; Vmt : PtrUInt; StoreP, LoadP : Pointer) : Word;
         {-Add new Id to list, returning zero for success, non-zero for error.
           Ignores requests for duplicate entries.}
       function AddPointer(Code : Word; Ptr : Pointer) : Word;
@@ -117,7 +118,7 @@ type
       idRegistered : IdList;      {List of ID's and procedure pointers
                                   registered with this stream}
       idStatus     : Word;        {Status of last operation}
-      idVmtError   : Word;        {Vmt offset when ecIdNotRegistered error occurred} {!!.03}
+      idVmtError   : PtrUInt;        {Vmt offset when ecIdNotRegistered error occurred} {!!.03}
 
       {... For opening and closing streams}
       {.Z+}
@@ -213,7 +214,7 @@ type
   DosIdStreamPtr = ^DosIdStream;
   DosIdStream =                   {Unbuffered DOS ID stream}
     object(IdStream)
-      Handle       : Word;        {DOS file handle}
+      Handle       : THandle;     {File handle}
 
       {... For opening and closing streams}
       constructor Init(FileName : String; Mode : Word);
@@ -737,7 +738,7 @@ type
 
 const
   MaxBitCount = 65534;              {Max bits in a bitset}
-  NoMoreBits = $FFFFFFFF;           {Constant indicating no more bits}
+  NoMoreBits = -1;                   {Constant indicating no more bits}
 type
   BitSetPtr = ^Bitset;
   BitSet =                          {Packed boolean set of up to 64K elements}
@@ -1075,10 +1076,13 @@ const
 
 implementation
 
-  {$I OPROOT.IN2}            {Stacks, lists, sets, heap management}
-  {$I OPROOT.IN3}            {Streams, string dictionaries}
+uses
+  SysUtils;
+
+  {$I oproot.in2}            {Stacks, lists, sets, heap management}
+  {$I oproot.in3}            {Streams, string dictionaries}
 {$IFDEF UseStreams}
-  {$I OPROOT.IN4}            {Libraries}
+  {$I oproot.in4}            {Libraries}
 {$ENDIF}
 
 {$IFDEF Debug}
@@ -1099,7 +1103,8 @@ var
 {$ENDIF}
 
 begin
-  HeapError := @OpConst.HeapFunc; {!!.21}
+  {The DOS heap error function becomes: failed allocations return nil}
+  ReturnNilIfGrowHeapFails := True;
   {$IFDEF Debug}
   sep := ExitProc;
   ExitProc := @OurExitProc;

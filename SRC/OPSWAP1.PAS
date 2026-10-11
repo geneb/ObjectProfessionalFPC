@@ -1,5 +1,5 @@
 
-{$IFDEF Windows}                                                      {!!.20}
+{$IFDEF OPWinTP}                                                      {!!.20}
   !! ERROR: This unit is not compatible with Windows applications !!  {!!.20}
 {$ENDIF}                                                              {!!.20}
 
@@ -9,7 +9,7 @@
 
 {$S-,R-,V-,I-,B-,F-,O-,A-}
 
-{$I OPDEFINE.INC}
+{$I opdefine.inc}
 
 {*********************************************************}
 {*                   OPSWAP1.PAS 1.30                    *}
@@ -20,6 +20,9 @@
 {*********************************************************}
 
 unit OpSwap1;
+  { FPC port: stubbed because TSR program swapping (interrupt hooks, EMS/XMS/disk
+    swapping of the DOS program image) has no equivalent on Windows/Linux.
+    See the note at the start of the implementation section. }
 
 interface
 
@@ -344,48 +347,32 @@ procedure SetSaveComPorts(Enable : Boolean);
 
 procedure InterruptsOn;
   {-Turn interrupts on}
-  inline($FB);               {sti}
+  { FPC port: no longer an inline STI; now a do-nothing procedure }
 
 procedure InterruptsOff;
   {-Turn interrupts off}
-  inline($FA);               {cli}
+  { FPC port: no longer an inline CLI; now a do-nothing procedure }
 
   {==========================================================================}
 
 implementation
 
-{$IFDEF SupportXms}          {!!.02}
-uses OpXms;                  {!!.02}
-{$ENDIF}                     {!!.02}
-
-{$L OPSwap1}
-
-type
-  StackRecord =
-    record
-      Size : Word;
-      Address : Pointer;
-    end;
+{ FPC port: stubbed because the program swapping / TSR machinery cannot exist
+  on Windows/Linux (it hooks interrupt vectors 05/08/09/10/13/14/16/17/25/26/28,
+  copies the program image to EMS/XMS/disk, edits MCBs and the PSP, and ends
+  with INT 21h function 31h).  What is kept as real, portable code: the
+  hot key / popup definition tables, flag setters, stack allocation helpers and
+  the module list bookkeeping, all operating on a heap-allocated
+  CSSwapDataType that replaces the original code-segment data area.  Nothing
+  can ever trigger a popup.  StayResSwap simply returns (the documented
+  "failed to go resident" outcome); SwapSize, ParagraphsToKeep,
+  MaxParagraphsToKeep return 0; WillSwapUseEms/Xms, SafeToDisable and
+  DisableTSR return False. }
 
 const
-  EmsPageSize = 16384;            {Bytes in a standard EMS page}
   WentResident : Boolean = False;
-  IfcSignature = $0F0F0;     {*** do not change!! ***}
-  IfcSignature2 = $0E0E0;    {*** do not change!! ***}
   IfcVersion = $400;         {version number of interface}
-  IRET : Byte = $CF;
 
-  Int5Handle = 1;            {ISR handles used by our interrupt handlers}
-  Int8Handle = 2;
-  Int9Handle = 3;
-  Int10Handle = 4;
-  Int13Handle = 5;
-  Int14Handle = 6;
-  Int16Handle = 7;
-  Int17Handle = 8;
-  Int25Handle = 9;
-  Int26Handle = 10;
-  Int28Handle = 11;
   CmdEntryHandle = 14;
 
   Initialized : Boolean = False;  {internal semaphore to flag need to init}
@@ -394,49 +381,40 @@ const
   NormalAttr  = 0;           {file attribute for normal file}         {!!.02}
   CommandBit  = $8000;       {bit set in SwapFlags if COMMAND active} {!!.02}
 
+type
+  StackRecord =
+    record
+      Size : Word;
+      Address : Pointer;
+    end;
+  StackRecPtr = ^StackRecord;
+
 var
-  SaveExitProc : Pointer;             {Exit chain pointer}
+  LocalSwapData : CSSwapDataType;     {replaces the data area in the code segment}
 
-  {used internally}
-  SwapOut : function : Boolean;
-  GoResident : procedure(ExitCode : Byte);
-  GoResidentNoSwap : procedure(ParasToKeep : Word; ExitCode : Byte);
-
-  procedure Save3FVector;
-    {Saves the current value of the overlay handler interrupt (3Fh)}
+  procedure InterruptsOn;
+    {-Turn interrupts on}
   begin
-    with CSSwapData^ do
-      GetIntVec($3F,NewInt3F);
+    { FPC port: stubbed because user programs cannot enable/disable interrupts }
   end;
 
-  procedure DeallocateSwapFile(Handle : Word;
-                               var Swap1, Swap2 : AsciiZ); external;
-    {-Free disk space used by swap files}
+  procedure InterruptsOff;
+    {-Turn interrupts off}
+  begin
+    { FPC port: stubbed because user programs cannot enable/disable interrupts }
+  end;
 
-  procedure DeallocateEmsHandle(Handle : Word); external;
-    {-Free EMS memory used for swap}
-
-
-  {$F+}
-  procedure EmergencyExit(LastSS,LastSP,LastCS,LastIP : Word); external;
-    {-Called by exit/error handler in case of runtime error while popped up}
-
-  {routines used internally by swap manager}
-  function EmsInstalled : Boolean; external;
-  function EmsPageFrame : Word; external;
-  function AllocateEmsPages(NumPages : Word) : Word; external;
-  function EmsPagesAvail : Word; external;
-  function DefaultDrive : Char; external;
-  function DiskFree(Drive : Byte) : LongInt; external;
-
-  procedure EmulateInt(var Regs : IntRegisters; IntAddr : Pointer); external;
+  procedure EmulateInt(var Regs : IntRegisters; IntAddr : Pointer);
     {-Emulates an interrupt}
-  {$F-}
+  begin
+    { FPC port: stubbed because there are no far-called real mode ISRs }
+  end;
 
   function DosBusyFlag : Byte;
     {-Returns current value of DOS busy flag}
   begin
-    DosBusyFlag := CsSwapData^.DosInUsePtr^;
+    { FPC port: stubbed because there is no InDOS flag; DOS is never busy }
+    DosBusyFlag := 0;
   end;
 
   procedure SetUserExitProc(UserExitProc : PopupProc);
@@ -449,58 +427,10 @@ var
   procedure InitCSSwapData;
     {-initializes the code segment relative data}
   begin
-    @GoResident := IntercomPtr(0);       {init the go resident pointer}
-    @SwapOut := IntercomPtr(1);          {init the swap out pointer}
-    @GoResidentNoSwap := IntercomPtr(3); {init the go resident no swap pointer}
+    { FPC port: no resident kernel entry points (Intercom 0..3) to fetch }
     Initialized := True;
     InitPops;
   end;
-
-  function PtrDiff(H, L : Pointer) : LongInt;
-  begin
-    PtrDiff := (LongInt(OS(H).S) shl 4+OS(H).O)-
-               (LongInt(OS(L).S) shl 4+OS(L).O);
-  end;
-
-  function InitVector(IntNumber, Handle : Byte; UserRoutine : Pointer) : Boolean;
-    {-Sets up an interrupt service routine}
-  begin
-    with CSSwapData^ do begin
-      {assume failure}
-      InitVector := False;
-
-      case Handle of
-        1..MaxIsrs :
-          with IsrArray[Handle] do
-            if not Captured then begin
-              {Setup variables}
-              IntNum := IntNumber;
-              GetIntVec(IntNumber, OrigAddr);
-
-              {Set the vector}
-              SetIntVec(IntNumber, UserRoutine);
-              NewAddr := UserRoutine;
-              Captured := True;
-              InitVector := True;
-            end;
-      end;
-    end;
-  end;
-
-  procedure RestoreVector(Handle : Byte);
-    {-Restores an interrupt vector to its original value}
-  begin
-    with CSSwapData^ do
-      case Handle of
-        1..MaxIsrs :
-          with IsrArray[Handle] do
-            if Captured then begin
-              SetIntVec(IntNum, OrigAddr);
-              Captured := False;
-              OrigAddr := nil;
-            end;
-      end;
-    end;
 
   procedure SetVecOnReturn(IntNum : Byte; ISR : Pointer);
     {-Set int vector in ISR table (takes affect when popup returns)}
@@ -508,337 +438,65 @@ var
     CSSwapData^.Vectors[IntNum] := ISR;
   end;
 
-  procedure SpecialRestoreAllVectors;
-  var
-    I : Byte;
-  begin
-    with CSSwapData^ do
-      for I := MaxIsrs downto 1 do
-        with IsrArray[I] do
-          if Captured then
-            Vectors[IntNum] := OrigAddr;
-  end;
-
   procedure RestoreAllVectors;
     {-Restores all captured interrupt vectors}
-  var
-    I : Word;
   begin
-    {restore in reverse order}
-    for I := MaxIsrs downto 1 do
-      RestoreVector(I);
+    { FPC port: stubbed because no interrupt vectors are ever captured }
   end;
 
   function SwapSize(ParasToKeep : Word) : LongInt;
     {-Return the size in bytes of the area of memory to be swapped}
-  var
-    P : Pointer;
-    LastToSave : Pointer;
   begin
-    {calculate last to save}
-    LastToSave := Ptr(PrefixSeg+ParasToKeep,0);
-    with CSSwapData^ do begin
-      P := IntercomPtr(2);
-      SwapSize := PtrDiff(LastToSave, P);
-    end;
+    { FPC port: stubbed because there is no DOS memory image to swap }
+    SwapSize := 0;
   end;
 
   function WillSwapUseEms(ParasToKeep : Word) : Boolean;
     {-Returns True if OpSwap will use EMS memory for swapping}
-  var                                 {!!.02}
-    SaveFlags : Word;                 {!!.02}
   begin
-    with CSSwapData^ do
-      if SwapUseEMS and EmsInstalled and (EmsPageFrame <> 0) then begin {!!.01}
-        {$IFDEF SupportXms}                           {!!.02}
-        if not EmsOverXms then                        {!!.02}
-          if WillSwapUseXms(ParasToKeep) then begin   {!!.02}
-            WillSwapUseEms := False;                  {!!.02}
-            Exit;                                     {!!.02}
-          end;                                        {!!.02}
-        {$ENDIF}                                      {!!.02}
-        SaveFlags := SwapFlags;                       {!!.02}
-        ClearFlag(SwapFlags,SingleSwap);              {!!.02}
-        PagesInEms := (SwapSize(ParasToKeep)+EmsPageSize-1) div EmsPageSize;
-        SwapFlags := SaveFlags;                       {!!.02}
-        WillSwapUseEms := PagesInEms <= EmsPagesAvail;
-      end
-      else
-        WillSwapUseEms := False;
+    { FPC port: stubbed because EMS does not exist }
+    WillSwapUseEms := False;
   end;
 
-{!!.02 begin}
 {$IFDEF SupportXms}
   function WillSwapUseXms(ParasToKeep : Word) : Boolean;
     {-Returns True if OpSwap will use XMS memory for swapping}
-  var
-    Largest, Total : Word;
-    TotalL  : LongInt;                                   {!!.03}
   begin
+    { FPC port: stubbed because XMS does not exist }
     WillSwapUseXms := False;
-    if SwapUseXms and XmsInstalled then begin
-      if EmsOverXms then
-        if WillSwapUseEms(ParasToKeep) then {works independent of B+/-}
-          Exit;
-      if QueryFreeExtMem(Total, Largest) <> 0 then
-        Exit;
-      TotalL := SwapSize(ParasToKeep);                   {!!.03}
-      with CSSwapData^ do
-        if not FlagIsSet(SwapFlags, SingleSwap) then
-          TotalL := TotalL * 2;                          {!!.03}
-      TotalL := (TotalL + (1024-1)) div 1024;            {!!.03}
-      WillSwapUseXms := TotalL <= LongInt(Largest);      {!!.03}
-    end;
   end;
 {$ENDIF}
-{!!.02 end}
-
-  {!!.13 new}
-  procedure CheckComActive;
-  var
-    BiosBaseAddr : array[0..3] of Word absolute $0040:$0000;
-  var
-    BaseAddr : Word;
-    I : Word;
-    Ints : Byte;
-  begin
-    with CSSwapData^ do
-      for I := 0 to 3 do begin
-        BaseAddr := BiosBaseAddr[I];
-        if BaseAddr <> 0 then begin
-          Ints := Port[BaseAddr+1];
-          if Ints <> 0 then
-            UartInts[I] := $FF00;
-        end;
-      end;
-  end;
-
-  function InitTSRSwap(LastToSave : Pointer;
-                       SwapFileName1, SwapFileName2 : String) : Boolean;
-  var
-    BytesFree : LongInt;            {Bytes free on swap file drive}
-    DriveChar : Char;               {Drive letter for swap file}
-    P         : Pointer;
-    L1        : Byte absolute SwapFileName1;
-    L2        : Byte absolute SwapFileName2;
-    Ems, Xms  : Boolean;                                            {!!.02}
-
-  begin
-    InitTSRSwap := False;
-
-    if FlagIsSet(CSSwapData^.SwapFlags, SaveUarts) then               {!!.21}
-      {Set "DontUse" Flag for any COM ports with interrupts active}   {!!.13}
-      CheckComActive;                                                 {!!.13}
-
-    with CSSwapData^ do begin
-      Ems := WillSwapUseEms(Seg(LastToSave^) - PrefixSeg);          {!!.02}{!!.12}
-      {if the swap is using EMS, then clear the single swap flag}   {!!.02}
-      if Ems then                                                   {!!.02}
-        ClearFlag(SwapFlags, SingleSwap);                           {!!.02}
-
-      {$IFDEF SupportXms}                                           {!!.02}
-      if not Ems then                                               {!!.02}
-        Xms :=  WillSwapUseXms(Seg(LastToSave^) - PrefixSeg)        {!!.02}{!!.12}
-      else                                                          {!!.02}
-        Xms := False;                                               {!!.02}
-      {$ENDIF}                                                      {!!.02}
-
-      {Call Intercom routine to return FirstToSave pointer}
-      P := IntercomPtr(2);
-      BytesSwapped := PtrDiff(LastToSave, P);
-
-      if BytesSwapped <= 0 then
-        Exit;
-
-      if Ems then begin                      {!!.01} {!!.02}
-        FrameSeg := EmsPageFrame;
-        if FrameSeg <> 0 then begin
-          PagesInEms := (BytesSwapped+EmsPageSize-1) div EmsPageSize;
-          EmsHandle := AllocateEmsPages(PagesInEms);
-          if EmsHandle <> $FFFF then begin
-            EmsAllocated := True;
-            InitTSRSwap := True;
-            SetFlag(SwapFlags, EmsFlag);
-            if not SwapOut then begin
-              WriteLn('Error attempting to swap memory - program aborting');
-              Halt(1);
-            end;
-            Exit;
-          end;
-        end;
-      end;
-
-      {$IFDEF SupportXms}        {!!.02 begin}
-      if Xms then begin
-        BytesFree  := BytesSwapped;
-        if not FlagIsSet(SwapFlags,SingleSwap) then
-          BytesFree := BytesFree * 2;
-        {for XMS, we use PagesInEms to hold the kilobytes allocated in XMS,
-         and EmsHandle to store the XMS handle}
-        PagesInEms := (BytesFree + (1024-1)) div 1024;
-        if AllocateExtMem(PagesInEms, EmsHandle) = 0 then begin
-          InitTSRSwap := True;
-          SetFlag(SwapFlags, XmsFlag);
-          XmsControlCS := OpXms.XmsControl;
-          if not SwapOut then begin
-            WriteLn('Error attempting to swap memory - program aborting');
-            Halt(1);
-          end;
-          Exit;
-        end;
-      end;
-      {$ENDIF}                   {!!.02 end}
-
-      if (L1 = 0) or (L1 > SwapFileMaxLen) or
-         (L2 = 0) or (L2 > SwapFileMaxLen) then
-        Exit;
-
-      Move(SwapFileName1[1],SwapFile1,Length(SwapFileName1));
-      Move(SwapFileName2[1],SwapFile2,Length(SwapFileName2));
-      if Pos(':', SwapFileName1) = 2 then
-        DriveChar := Upcase(SwapFileName1[1])
-      else
-        DriveChar := DefaultDrive;
-      BytesFree := DiskFree(Byte(DriveChar)-$40);
-      if FlagIsSet(SwapFlags, SingleSwap) then                     {!!.02}
-        FileAllocated := (BytesFree > BytesSwapped)                {!!.02}
-      else                                                         {!!.02}
-        FileAllocated := (BytesFree > (BytesSwapped*2));           {!!.02}
-      if FileAllocated then begin
-        InitTSRSwap := True;
-        if not SwapOut then begin
-          WriteLn('Error attempting to swap memory - program aborting');
-          Halt(1);
-        end;
-      end;
-    end;
-  end;
 
   procedure InitPops;
     {-Must be called before any other popup specific routines.}
-  {$IFDEF ThwartSideKick}
-  type
-    Array4 = array[0..3] of Char;
-  {$ENDIF}
-  const
-    {                I B K S}
-    SideKickFlag = $49424B53;
-    SideKickPlus = $CB;
-  {$IFDEF ThwartSideKick}
-    SideKickCode : Array4 = (
-      #$8C, #$CB,  {MOV  BX,CS}
-      #$3B, #$C3); {CMP  AX,BX}
-     {#$74          JZ   xxxx <-- if found, change the JZ to a JMP SHORT}
-  {$ENDIF}
-  var
-    P : Pointer;
-    PSO : OS absolute P;
-    IsrCS : Word;
-    {$IFDEF ThwartSideKick}
-    PB : ^Byte absolute P;
-    PA4 : ^Array4 absolute P;
-    I : Word;
-    {$ENDIF}
-
-    procedure InitVectorPrim(IntNumber, Handle : Byte; UserRoutine : Pointer);
-      {-Sets up an interrupt service routine}
-    begin
-      if not InitVector(IntNumber, Handle, UserRoutine) then begin
-        WriteLn('Unable to install TSR manager');
-        Halt(1);
-      end;
-    end;
-
   begin
-    {don't do this twice}
+    { FPC port: stubbed because there are no interrupt vectors to hook and
+      no SideKick to detect }
     if TSRInitialized then
       Exit;
-
-    {test for SideKick: 'SKBI' just before start of INT $8 handler. A RETF
-     instruction just before SKBI signals SideKickPlus, which we can load
-     after.}
-    GetIntVec($08, P);
-    SideKickLoaded :=
-      (MemL[PSO.S:PSO.O-4] = SideKickFlag) and
-      (Mem[PSO.S:PSO.O-5] <> SideKickPlus);
-
-    {$IFDEF ThwartSideKick}
-    if SideKickLoaded then begin
-      {see if we can thwart its INT 9 grabber so we can go resident}
-      {search for the tell-tale code}
-      for I := 0 to 100 do begin
-        {have we found it?}
-        if PA4^ = SideKickCode then begin
-          {if so, disable the INT 9 grabber...}
-          Inc(PSO.O, 4);
-          {make sure it's OK to change it}
-          case PB^ of
-            $74, $EB :
-              begin
-                {turn the conditional jump into a short jump...}
-                InterruptsOff;
-                PB^ := $EB;
-                InterruptsOn;
-
-                {...and clear the SideKick flag}
-                SideKickLoaded := False;
-              end;
-          end;
-        end;
-        Inc(PSO.O);
-      end;
-    end;
-    {$ENDIF}
-
-    with CSSwapData^ do begin
-      IsrCS := OS(@IntercomPtr).S;
-
-      {initialize our interrupt vectors}
-      InitVectorPrim($05, Int5Handle, Ptr(IsrCS,IsrTable[isrInt5]));
-      InitVectorPrim($08, Int8Handle, Ptr(IsrCS,IsrTable[isrInt8]));
-      InitVectorPrim($09, Int9Handle, Ptr(IsrCS,IsrTable[isrInt9]));
-      InitVectorPrim($13, Int13Handle, Ptr(IsrCS,IsrTable[isrInt13]));
-      InitVectorPrim($16, Int16Handle, Ptr(IsrCS,IsrTable[isrInt16]));
-      InitVectorPrim($25, Int25Handle, Ptr(IsrCS,IsrTable[isrInt25]));
-      InitVectorPrim($26, Int26Handle, Ptr(IsrCS,IsrTable[isrInt26]));
-      InitVectorPrim($28, Int28Handle, Ptr(IsrCS,IsrTable[isrInt28]));
-
-      {don't filter the following interrupts unless we're running under OS/2}
-      if Hi(DosVersion) >= 10 then begin
-        InitVectorPrim($10, Int10Handle, Ptr(IsrCS,IsrTable[isrInt10]));
-        InitVectorPrim($14, Int14Handle, Ptr(IsrCS,IsrTable[isrInt14]));
-        InitVectorPrim($17, Int17Handle, Ptr(IsrCS,IsrTable[isrInt17]));
-      end;
-      SetFlag(SwapFlags, SaveUarts);                                   {!!.13}
-    end;
+    SideKickLoaded := False;
     TSRInitialized := True;
   end;
 
   function AllocateStack(var P : Pointer; SizeInBytes : Word) : Boolean;
     {-This routine allocates a stack of size SizeInBytes}
   var
-    StackRecPtr : ^StackRecord absolute P;
-    POfs : Word absolute P;
-    PTemp : Pointer;
+    Base : Pointer;
     ActualSize : LongInt;
   begin
     {allocate space for the stack record as well}
-    ActualSize := LongInt(SizeInBytes)+6;
+    ActualSize := LongInt(SizeInBytes)+SizeOf(StackRecord);
 
-    {see if sufficient memory remains}
-    if (MaxAvail >= ActualSize) and (ActualSize <= 65521) then begin
-      {allocate the memory}
-      GetMem(P, Word(ActualSize));
+    {FPC port: MaxAvail check dropped; limit kept for the Word size field}
+    if ActualSize <= 65521 then begin
+      GetMem(Base, Word(ActualSize));
 
-      {save the address}
-      PTemp := P;
-
-      {point P (hence StackRecPtr) to where the stack record goes}
-      Inc(POfs, SizeInBytes);
+      {P points to where the stack record goes (top of the stack)}
+      P := Pointer(PtrUInt(Base)+SizeInBytes);
 
       {save the address returned by GetMem and the # of bytes allocated}
-      with StackRecPtr^ do begin
-        Address := PTemp;
+      with StackRecPtr(P)^ do begin
+        Address := Base;
         Size := Word(ActualSize);
       end;
 
@@ -850,53 +508,29 @@ var
 
   procedure DeallocateStack(P : Pointer);
     {-Frees an allocated stack}
-  var
-    StackRecPtr : ^StackRecord absolute P;
   begin
-    with StackRecPtr^ do
+    with StackRecPtr(P)^ do
       FreeMem(Address, Size);
   end;
 
   function ParagraphsToKeep : Word;
     {-Returns # of paragraphs currently used for code, data, stack, and heap.}
   begin
-    {keep everything from PSP to top of heap}
-    ParagraphsToKeep := Succ(Seg(HeapPtr^)-PrefixSeg);
+    { FPC port: stubbed because there is no PSP/heap paragraph layout }
+    ParagraphsToKeep := 0;
   end;
 
   function MaxParagraphsToKeep : Word;
     {-Maximum number of paragraphs to keep when going resident}
-  var
-    TopOfMem : Pointer;
   begin
-    TopOfMem := Ptr(PrefixSeg, 2);
-    MaxParagraphsToKeep := Word(TopOfMem^)-PrefixSeg;
+    { FPC port: stubbed because there is no PSP/heap paragraph layout }
+    MaxParagraphsToKeep := 0;
   end;
-
-{$IFNDEF Heap6} {!!.10}
-  function HeapEnd : Pointer;
-    {-Returns a pointer to the end of the free list}
-  begin
-    if Ofs(FreePtr^) = 0 then
-      {Free list is empty}
-      HeapEnd := Ptr(Seg(FreePtr^)+$1000, 0)
-    else
-      HeapEnd := Ptr(Seg(FreePtr^)+Ofs(FreePtr^) shr 4, Ofs(FreePtr^) and $F);
-  end;
-{$ENDIF} {!!.10}
 
   procedure PopupsOn;
     {-Turns popups on}
-  const
-    Saved3F : Boolean = False;
   begin
     CSSwapData^.PopupsEnabled := True;
-
-    if not Saved3F then begin
-      {save the current INT $3F vector}
-      Save3Fvector;
-      Saved3F := True;
-    end;
   end;
 
   procedure PopupsOff;
@@ -909,22 +543,21 @@ var
     {-Change a hotkey from OldHotKey to NewHotKey}
   var
     Handle : Byte;
-    OldScan : Byte absolute OldHotKey;
-    NewScan : Byte absolute NewHotKey;
+    OldScan : Byte;
+    NewScan : Byte;
   begin
+    OldScan := Lo(OldHotKey);
+    NewScan := Lo(NewHotKey);
     with CSSwapData^ do begin
       ChangeHotKey := False;
       case NewScan of
         1..MaxScanCode : {ok} ;
         else Exit;
       end;
-      case Lo(OldHotKey) of
+      case OldScan of
         1..MaxScanCode :
           if (PopupKeys[OldScan] <> 0) and
           ((OldScan = NewScan) or (PopupKeys[NewScan] = 0)) then begin
-            {with interrupts off, switch hot keys}
-            InterruptsOff;
-
             {get rid of the current assignment}
             Handle := PopupKeys[OldScan];
             PopupKeys[OldScan] := 0;
@@ -932,7 +565,6 @@ var
 
             PopupKeys[NewScan] := Handle;
             ShiftKeys[NewScan] := Hi(NewHotKey);
-            InterruptsOn;
             ChangeHotKey := True;
           end;
       end;
@@ -942,23 +574,27 @@ var
   function AddHotKey(PrimaryHotKey, SecondaryHotKey : Word) : Boolean;
     {-Add a second hot key for the popup with the specified primary hot key}
   var
-    PScan : Byte absolute PrimaryHotKey;
-    SScan : Byte absolute SecondaryHotKey;
+    PScan : Byte;
+    SScan : Byte;
   begin
+    PScan := Lo(PrimaryHotKey);
+    SScan := Lo(SecondaryHotKey);
     AddHotKey := False;
     with CSSwapData^ do
       case SScan of
         1..MaxScanCode :
-          if (PopupKeys[PScan] <> 0) and (PopupKeys[SScan] = 0) then begin
-            {with interrupts off, add the hot key}
-            InterruptsOff;
+          if (PScan <= MaxScanCode) and
+             (PopupKeys[PScan] <> 0) and (PopupKeys[SScan] = 0) then begin
             PopupKeys[SScan] := PopupKeys[PScan];
             ShiftKeys[SScan] := Hi(SecondaryHotKey);
-            InterruptsOn;
-
             AddHotKey := True;
           end;
       end;
+  end;
+
+  function IsNilProc(var P) : Boolean;
+  begin
+    IsNilProc := Pointer(P) = nil;
   end;
 
   function DefinePopProc(var Handle : Byte; Routine : PopupProc;
@@ -971,32 +607,17 @@ var
     with CSSwapData^ do
       {search for an available handle}
       for B := 1 to MaxPopups do
-        if (@PopupAddrs[B] = nil) then begin
-          {assign the handle}
+        if IsNilProc(PopupAddrs[B]) then begin
           Handle := B;
-
-          {install the popup}
           PopupAddrs[B] := Routine;
           PopupStacks[B] := StackPtr;
           PopupInUse[B] := False;
-
-          {signal success}
           DefinePopProc := True;
           Exit;
         end;
 
     {if we get to here we failed}
     DefinePopProc := False;
-  end;
-
-  procedure DeletePopProc(Handle : Byte);
-    {-Deletes a popup routine defined with DefinePopProc.  Its handle may then
-      be used for other popups.}
-  begin
-    with CSSwapData^ do
-      case Handle of
-        1..MaxPopups : @PopupAddrs[Handle] := nil;
-      end;
   end;
 
   function DefinePop(HotKey : Word; Routine : PopupProc;
@@ -1014,10 +635,7 @@ var
         1..MaxScanCode :
           if PopupKeys[Lo(HotKey)] = 0 then
             if DefinePopProc(B, Routine, StackPtr) then begin
-              {set the shift key}
               ShiftKeys[Lo(HotKey)] := Hi(HotKey);
-
-              {If popups are on, next statement makes this one active}
               PopupKeys[Lo(HotKey)] := B;
               DefinePop := True;
             end;
@@ -1025,198 +643,21 @@ var
     end;
   end;
 
-  procedure DisablePopup;
-    {-An external interface procedure that attempts to disable the popup and
-      reports the results in the UserData field of the IfcRecord. UserData is
-      set to 1 on success.}
+  procedure InstallCmdEntryPtr(ProcPtr : PopupProc);
+    {-Sets up a user-defined CmdEntryPtr}
   begin
-    LongInt(CSSwapData^.ThisIFC.UserData) := LongInt(Ord(DisableTSR));
-  end;
-
-  procedure StayResSwap(ParasToKeep : Word;
-                        ExitCode : Byte;
-                        SwapFileName1,
-                        SwapFileName2 : String;
-                        UseSwapping : Boolean);
-   {-Terminate and stay resident. If UseSwapping is True, then everything
-     linked before the label FirstToSave in the OpSwap unit is released.
-     If UseSwapping is False, then this call releases all memory except
-     ParasToKeep.}
-  var
-    LastToSave : Pointer;
-{$IFDEF Heap6}                 {!!.10}
-    SaveHeapEnd : Pointer;     {!!.10}
-{$ELSE}                        {!!.10}
-    SaveFreePtr : Pointer;
-    NewFreePtr : Pointer;
-    NewFreeSeg : Word;
-    FreeListSize : Word;
-{$ENDIF}                       {!!.10}
-    SavePopupState : Boolean;
-
-Label
-  ExitPoint;
-
-  begin
-    {if we return from this call, we failed to go resident}
-    {save the current value of FreePtr}
-{$IFDEF Heap6}                           {!!.10}
-    SaveHeapEnd := HeapEnd;              {!!.10}
-{$ELSE}                                  {!!.10}
-    {save the current value of FreePtr}
-    SaveFreePtr := FreePtr;
-{$ENDIF}                                 {!!.10}
-
-    {save state of popups (on or off) and temporarily turn them off}
-    SavePopupState := CSSwapData^.PopupsEnabled;
-    CSSwapData^.PopupsEnabled := False;
-
-    {calculate last to save}
-    LastToSave := Ptr(PrefixSeg+ParasToKeep,0);
-
-    {exit if SideKick is loaded and couldn't be thwarted}
-    if SideKickLoaded then
-      Goto ExitPoint;
-
-    {reject requests for less than the bare minimum or more than the maximum}
-    if (ParasToKeep < ParagraphsToKeep) or (ParasToKeep > MaxParagraphsToKeep) then
-      Goto ExitPoint;
-
-    CSSwapData^.AllOfMem := ParasToKeep;                  {!!.02}
-
-{$IFDEF Heap6}                                            {!!.10}
-    HeapEnd := LastToSave;                                {!!.10}
-{$ELSE}                                                   {!!.10}
-    {Calculate the number of bytes to move}
-    FreeListSize := PtrDiff(TopOfHeap, HeapEnd);
-
-
-    {calculate new location of the free list}
-    NewFreeSeg := (PrefixSeg+ParasToKeep)-$1000;
-    if FreeListSize = 0 then
-      NewFreePtr := Ptr(NewFreeSeg, 0)
-    else
-      NewFreePtr := Ptr(NewFreeSeg, Ofs(FreePtr^));
-
-    {Move the free list down}
-    if FreeListSize <> 0 then
-      Move(FreePtr^, NewFreePtr^, FreeListSize);
-    FreePtr := NewFreePtr;
-{$ENDIF}                                                  {!!.10}
-
-    {set flag for error/exit handler}
-    WentResident := True;
-
-    {restore vectors captured by runtime library}
-    SetIntVec($00, SaveInt00);
-    SetIntVec($02, SaveInt02);
-    SetIntVec($1B, SaveInt1B);
-    SetIntVec($23, SaveInt23);
-    SetIntVec($24, SaveInt24);
-    SetIntVec($34, SaveInt34);
-    SetIntVec($35, SaveInt35);
-    SetIntVec($36, SaveInt36);
-    SetIntVec($37, SaveInt37);
-    SetIntVec($38, SaveInt38);
-    SetIntVec($39, SaveInt39);
-    SetIntVec($3A, SaveInt3A);
-    SetIntVec($3B, SaveInt3B);
-    SetIntVec($3C, SaveInt3C);
-    SetIntVec($3D, SaveInt3D);
-    SetIntVec($3E, SaveInt3E);
-    SetIntVec($3F, SaveInt3F);
-    SetIntVec($75, SaveInt75);
-
-    {Init the TSRSwap system}
-    if UseSwapping then begin
-      SwappingEnabled := True;
-      if not InitTSRSwap(LastToSave,SwapFileName1,SwapFileName2) then
-        Goto ExitPoint;
-    end;
-
-    {restore the state of popups}
-    CSSwapData^.PopupsEnabled := SavePopupState;
-    if SwappingEnabled then
-      GoResident(ExitCode)
-    else
-      GoResidentNoSwap(ParasToKeep, ExitCode);
-
-  ExitPoint:
-{$IFDEF Heap6}                                            {!!.10}
-    HeapEnd := SaveHeapEnd;                               {!!.10}
-{$ELSE}                                                   {!!.10}
-    {if we get this far, we failed, so restore FreePtr}
-    FreePtr := SaveFreePtr;
-{$ENDIF}                                                  {!!.10}
-    WentResident := False;
-    {restore the state of popups}
-    CSSwapData^.PopupsEnabled := SavePopupState;
+    { FPC port: stubbed because the command entry point was a far address
+      inside the resident ISR segment; no one can call it, so it stays Nil }
+    CSSwapData^.ThisIfc.CmdEntryPtr := nil;
   end;
 
   function GetLastModulePtr : Pointer;
     {-Return a pointer to the last TPRO TSR loaded before us}
-  var
-    FoundIfc : Boolean;
-    P : IfcPtr;
-    IACAptr : Pointer absolute $40:$F0;
-    SaveIACA : Pointer;
   begin
-    {assume failure}
-    P := nil;
-    SaveIACA := IACAptr;
-    IACAptr := nil;
-    FoundIfc := False;                                    {!!.13}
-
-    {since Intr() in TP 4.0 is not re-entrant, and this might be called from
-     inside a popup, we use inline}
-    Inline(
-      $B8/>IFCSIGNATURE/     {mov ax,>IfcSignature   ;standard interface function code}
-      $31/$FF/               {xor di,di              ;es:di = nil}
-      $8E/$C7/               {mov es,di}
-      $CD/$16/               {int $16                ;call INT 16}
-      $F7/$D0/               {not ax                 ;flip bits}
-      $3D/>IFCSIGNATURE/     {cmp ax,>IfcSignature   ;AX = IfcSignature only if INT 16 flipped bits}
-      $75/$22/               {jne Done               ;Ifc handler not found? !!.21}
-      $8C/$C0/               {mov ax,es              ;use second method if es = 0 !!.21}
-      $09/$C0/               {or ax,ax               ;!!.21}
-      $74/$0C/               {jz NotFound            ;!!.21}
-      $09/$FF/               {or di,di               ;or di = 0 !!.21}
-      $74/$08/               {jz NotFound}
-      $89/$7E/<P/            {mov [bp+<P],di         ;offset of list pointer in P}
-      $8C/$46/<P+2/          {mov [bp+<P+2],es       ;segment of list pointer in P}
-      $EB/$0C/               {jmp short Found}
-                             {NotFound:              ;try second method - SuperKey can defeat the first}
-      $B8/>IFCSIGNATURE2/    {mov ax,>IfcSignature2  ;secondary function code}
-      $CD/$16/               {int $16                ;call INT 16}
-      $F7/$D0/               {not ax                 ;AX = not AX}
-      $3D/>IFCSIGNATURE2/    {cmp ax,>IfcSignature2  ;AX = IfcSignature2?}
-      $75/$04/               {jne Done               ;Ifc handler not found?}
-                             {Found:}
-      $C6/$46/<FOUNDIFC/$01);{mov byte ptr [bp+<FoundIfc],1   ;set Found flag}
-                             {Done:}
-
-    if not FoundIfc then
-      GetLastModulePtr := nil
-    else if P <> nil then
-      GetLastModulePtr := P
-    else
-      GetLastModulePtr := IACAptr;
-
-    {restore intra-applications comm. area}
-    IACAptr := SaveIACA;
-  end;
-
-  procedure InstallCmdEntryPtr(ProcPtr : PopupProc);
-    {-Sets up a user-defined CmdEntryPtr}
-  begin
-    with CSSwapData^, ThisIfc do
-      if @ProcPtr = Nil then
-        @CmdEntryPtr := Nil
-      else begin
-        @CmdEntryPtr := Ptr(OS(@IntercomPtr).S, IsrTable[isrCmd]);
-        if not DefinePopProc(CmdEntryHandle, ProcPtr, Ptr(SSeg, SPtr)) then
-          @CmdEntryPtr := Nil;
-      end;
+    { FPC port: stubbed because the module chain was discovered through an
+      INT 16h signature call and the 40:F0 intra-applications area; with no
+      resident modules the original returns Nil }
+    GetLastModulePtr := nil;
   end;
 
   procedure InstallModule(var ModName : string; CmdEntryPtr : PopupProc);
@@ -1229,7 +670,7 @@ Label
       if not IfcInstalled then
         with ThisIfc do begin
           {see if anyone else is home}
-          P := GetLastModulePtr;
+          P := IfcPtr(GetLastModulePtr);
           if P <> nil then begin
             P^.NextIfc := @ThisIfc;
             PrevIfc := P;
@@ -1237,7 +678,6 @@ Label
           else
             PrevIfc := nil;
 
-          {initialize the other fields in the record}
           ModuleName := ModName;
           NamePtr := @ModuleName;
           NextIfc := nil;
@@ -1270,8 +710,7 @@ Label
   var
     P : IfcPtr;
   begin
-    {get pointer to previous module}
-    P := GetLastModulePtr;
+    P := IfcPtr(GetLastModulePtr);
     ModulePtrByName := nil;
 
     {search backward through the list}
@@ -1285,124 +724,51 @@ Label
           P := P^.PrevIfc;
   end;
 
+  function ModuleInstalled(var ModuleName : string) : Boolean;
+    {-Returns true if ModuleName is installed}
+  begin
+    ModuleInstalled := ModulePtrByName(ModuleName) <> nil;
+  end;
+
   function SafeToDisable : Boolean;
     {-Returns True if it is safe to disable the TSR}
-  var
-    I : Word;
-    P : Pointer;
-    VecsGrabbed : set of Byte;
-
   begin
+    { FPC port: stubbed because the program can never go resident }
     SafeToDisable := False;
-
-    {not safe if we never went resident}
-    if not WentResident then
-      Exit;
-
-    {initialize VecsGrabbed entries to false}
-    FillChar(VecsGrabbed, SizeOf(VecsGrabbed), 0);
-
-    {go backwards, looking for changed vectors that have been grabbed only once}
-    with CSSwapData^ do
-      for I := MaxIsrs downto 1 do
-        with IsrArray[I] do
-          if Captured then begin
-            if SwapEnabled or FlagIsSet(SwapFlags, MsQuickFix) then {!!.02}
-              P := Vectors[IntNum]                                  {!!.02}
-            else                                                    {!!.02}
-              GetIntVec(IntNum, P);                                 {!!.02}
-            if (IntNum <> 5) and (P <> NewAddr)
-                and not(IntNum in VecsGrabbed) then
-              Exit;
-            VecsGrabbed := VecsGrabbed+[Lo(IntNum)];
-          end;
-
-    {if we get here it's safe}
-    SafeToDisable := True;
   end;
 
   function DisableTSR : Boolean;
     {-Disable TSR by restoring interrupt vectors and releasing memory. This
       does *not* halt the program. Returns false if it's not safe.}
-  var
-    Regs : Registers;
-    I : Word;
   begin
-    with CSSwapData^ do                           {!!.01}
-      if @UserExitProc <> nil then                {!!.01}
-        UserExitProc;                             {!!.01}
-
-    {don't disable if it's not safe}
+    { FPC port: stubbed because the program can never go resident }
+    with CSSwapData^ do
+      if not IsNilProc(UserExitProc) then
+        UserExitProc;
     DisableTSR := False;
-    if not SafeToDisable then
-      Exit;
-
-    {disable popups and restore any other vectors taken over}
-    PopupsOff;
-
-
-    Initialized := False;
-
-    with CSSwapData^ do                                        {!!.02}
-      if SwapEnabled or FlagIsSet(SwapFlags, MsQuickFix) then  {!!.02}
-        SpecialRestoreAllVectors
-      else
-        RestoreAllVectors;
-
-    UninstallModule;
-    CSSwapData^.Disable := True;
-
-    with Regs do begin
-      {close all file handles, ignoring error codes}
-      for I := 0 to 19 do begin
-        AH := $3E;           {close file handle function}
-        BX := I;             {handle}
-        MsDos(Regs);
-      end;
-
-      {$IFNDEF StonyBrook}     {!!.13}
-      if ReleaseEms then begin
-        DX := OvrEmsHandle;
-        AH := $45;
-        Intr($67, Regs);
-      end;
-      {$ENDIF}
-    end;
-    DisableTSR := True;
   end;
 
-  function ModuleInstalled(var ModuleName : string) : Boolean;
-    {-Returns true if ModuleName is installed}
+  procedure DisablePopup;
+    {-An external interface procedure that attempts to disable the popup and
+      reports the results in the UserData field of the IfcRecord. UserData is
+      set to 1 on success.}
   begin
-    {let ModulePtrByName do the searching}
-    ModuleInstalled := ModulePtrByName(ModuleName) <> nil;
+    CSSwapData^.ThisIFC.UserData := Pointer(PtrUInt(Ord(DisableTSR)));
   end;
 
-  {$F+}
-  procedure TsrSwapExit;
-    {-Error/exit handler}
+  procedure StayResSwap(ParasToKeep : Word;
+                        ExitCode : Byte;
+                        SwapFileName1,
+                        SwapFileName2 : String;
+                        UseSwapping : Boolean);
+   {-Terminate and stay resident. If we return from this call, we failed to
+     go resident.}
   begin
-    {restore previous exit handler}
-    ExitProc := SaveExitProc;
-    if (not Initialized) then
-      Exit;
-
-    {uninstall the module and turn popups off}
-
-    UninstallModule;
-    PopupsOff;
-
-    if WentResident then begin
-      {try to disable the TSR}
-      if DisableTSR then
-        with CSSwapData^ do
-          EmergencyExit(LastEntrySS,LastEntrySP,LastEntryCS,LastEntryIP);
-    end;
-
-    if (not SwappingEnabled) or (not CSSwapData^.SwapEnabled) then {!!!!!!}
-      RestoreAllVectors;
+    { FPC port: stubbed because a TSR (INT 21h/31h, swapping the image to
+      EMS/XMS/disk) is impossible on Windows/Linux; returns as the original
+      does when going resident fails }
+    WentResident := False;
   end;
-  {$F-}
 
   procedure SetSingleSwapFile(On : Boolean);           {!!.02}
   begin
@@ -1416,9 +782,6 @@ Label
   end;
 
   procedure SetQuickFixMode(On : Boolean); {!!.01}
-    {-Enable or disable special fix for MS Quick (Basic, C) IDE bug. This option
-      only has meaning when operating in non-swapping mode. When On is True, all
-      ISR's will be swapped to the state they were in when the TSR loaded.}
   begin
     if On then
       SetFlag(CSSwapData^.SwapFlags, MSQuickFix)       {!!.02}
@@ -1445,9 +808,6 @@ Label
   end;
 
   procedure SetSwapFileAttr(Hidden : Boolean);    {!!.02}
-    {-If Hidden is True, then swap files will be created with attribute 6
-      (hidden+ system), otherwise they will be created with attribute 0
-      (normal)}
   begin
     if Hidden then
       CSSwapData^.FileAttr := HiddenAttr
@@ -1472,15 +832,9 @@ Label
   end;
 
 begin
-{$IFNDEF Heap6}                                {!!.10}
-  {save top of heap for later}
-  TopOfHeap := Ptr(Seg(FreePtr^)+$1000, 0);
-{$ENDIF}                                       {!!.10}
-
-  {save SSeg for later}
-  SaveSSeg := SSeg;
-
-  {set up error/exit handler}
-  SaveExitProc := ExitProc;
-  ExitProc := @TSRSwapExit;
+  FillChar(LocalSwapData, SizeOf(LocalSwapData), 0);
+  CSSwapData := @LocalSwapData;
+  CSSwapData^.PopupsEnabled := False;
+  SaveSSeg := 0;
+  TopOfHeap := nil;
 end.

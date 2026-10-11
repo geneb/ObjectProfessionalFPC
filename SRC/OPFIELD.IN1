@@ -30,7 +30,6 @@
       DayOnly, DayOnlyU,
       YearOnly,
       HourOnly, HourOnlyU,
-      MinOnly, MinOnlyU,
       SecOnly, SecOnlyU,
       {$ENDIF}
       NumberOnly : CharOK := Ch in NumberOnlySet;
@@ -283,7 +282,7 @@
     @efDraw := S.ReadPointer;
     @efEditor := S.ReadPointer;
 
-    S.Read(efMaxLen, Ofs(efVarPtr)-Ofs(efMaxLen)+SizeOf(efVarPtr));
+    S.Read(efMaxLen, PtrUInt(@efVarPtr)-PtrUInt(@efMaxLen)+SizeOf(efVarPtr));
 
     if S.PeekStatus <> 0 then begin
       Done;
@@ -325,7 +324,7 @@
     WritePointerToStream(@efDraw);
     WritePointerToStream(@efEditor);
 
-    S.Write(efMaxLen, Ofs(efVarPtr)-Ofs(efMaxLen)+SizeOf(efVarPtr));
+    S.Write(efMaxLen, PtrUInt(@efVarPtr)-PtrUInt(@efMaxLen)+SizeOf(efVarPtr));
   end;
 
 {$ENDIF}
@@ -510,7 +509,7 @@
       if LongFlagIsSet(sfFlags, ifHexadecimal) and (S <> '') then
         S := '$'+S;
       if S = '-2147483648' then
-        L := $80000000
+        L := Low(LongInt)
       else
         efStr2Long := Str2Long(S, L);
     end;

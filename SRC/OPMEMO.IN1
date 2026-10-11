@@ -263,7 +263,7 @@
       PC2 := PC;
       while PC2^ = ' ' do begin
         Inc(I);
-        Inc(OS(PC2).O);
+        Inc(PC2);
       end;
       Spaces := I;
 
@@ -295,7 +295,7 @@
           I := 0;
           while (PC^ > ' ') do begin
             Inc(I);
-            Inc(OS(PC).O);
+            Inc(PC);
           end;
 
           NeedToCombine := (I+StLen <= meMargin);
@@ -702,7 +702,7 @@ ExitLoop2:                                             {!!.11}
     {initialize fields not stored to 0}
     meBufPtr := nil;
     FillChar(meTotalBytes,
-      Ofs(meSaveTotalLines)-Ofs(meTotalBytes)+SizeOf(meSaveTotalLines), 0);
+      PtrUInt(@meSaveTotalLines)-PtrUInt(@meTotalBytes)+SizeOf(meSaveTotalLines), 0);
 
     {Load the underlying command window}
     if not CommandWindow.Load(S) then

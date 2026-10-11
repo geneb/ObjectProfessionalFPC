@@ -1,10 +1,10 @@
-{$IFDEF Windows}                                                      {!!.20}
+{$IFDEF OPWinTP}                                                      {!!.20}
   !! ERROR: This unit is not compatible with Windows applications !!  {!!.20}
 {$ENDIF}                                                              {!!.20}
 
 {$S-,R-,V-,I-,B-,F+,O+,A-}
 
-{$I OPDEFINE.INC}
+{$I opdefine.inc}
 
 {*********************************************************}
 {*                  OPEDITOR.PAS 1.30                    *}
@@ -37,7 +37,7 @@ uses
   {$ENDIF}         {!!.03}
   OpMemo;
 
-  {$I OPEDITOR.ICD}  {configuration data}
+  {$I opeditor.icd}  {configuration data}
 
 const
   {option codes}
@@ -68,8 +68,8 @@ const
   teSearchEnd      = $08000000;  {flag set at end of a search}
   teHighlightOn    = $10000000;  {highlighting on}
   teHighlightBack  = $20000000;  {highlighting goes backwards?}
-  teMarkersOn      = $40000000;  {text markers visible?}
-  teBlockOn        = $80000000;  {block markers on?}
+  teMarkersOn      = LongInt($40000000);  {text markers visible?}
+  teBlockOn        = LongInt($80000000); {block markers on?}
 
   {default options}
   DefEditorOptions : LongInt = teInsert+teIndent+teWordWrap+teMapCtrls+
@@ -308,7 +308,7 @@ const
   CtrlZ : Char = ^Z;
   SearchFailed = $FFFF;
 
-  {$I OPEDITOR.IN1}
+  {$I opeditor.in1}
 
   constructor TextEditor.Init(X1, Y1, X2, Y2 : Byte; BufferSize : Word);
     {-Create a window for editing text files}

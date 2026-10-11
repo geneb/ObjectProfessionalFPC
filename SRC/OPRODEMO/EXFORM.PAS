@@ -70,4 +70,3 @@ begin
   Dispose(FrmPtr, Done);      {clean up}
   Dispose(PrnPtr, Done);
 end.
-

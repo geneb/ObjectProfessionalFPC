@@ -17,7 +17,7 @@
  defined as an Extended or a Real. It also controls the inclusion of certain
  methods that apply only to 8087 numeric types.}
 
-  {$N-}
+  {.$N-}
 
 {This directive forces all units to contain an initialization block, even
  those that do not have any actual initialization code. Adding these blocks
@@ -79,12 +79,12 @@ OPENTRY. It also enables certain options in OPDIR.}
  element size exceeding 4 bytes, FastDispose makes a significant difference
  in the speed of heap deallocation when the sort is finished.}
 
-  {$DEFINE FastDispose}
+  {.$DEFINE FastDispose} {FPC port: disabled, relies on the TP heap manager}
 
 {If the following directive is defined, OPTSR and OPSWAP try to
  thwart SideKick}
 
-  {$DEFINE ThwartSideKick}
+  {.$DEFINE ThwartSideKick} {FPC port: disabled, DOS TSR only}
 
 {If the following directive is defined, streams support is enabled in all
  objects}
@@ -96,7 +96,7 @@ OPENTRY. It also enables certain options in OPDIR.}
  reassemble the file. Failure to do so will cause an error when recompiling
  OPSWAP.}
 
-  {$DEFINE SupportXms}                       {!!.02}
+  {.$DEFINE SupportXms}                       {!!.02 FPC port: disabled}
 
 {If the following directive is defined, OPDRAG support will be included in all
 units containing command windows.}
@@ -126,4 +126,13 @@ units containing command windows.}
     {$UNDEF FastDispose}      {no use of FastDispose in sorts}
    {$ENDIF}
   {$ENDIF}
-
+
+{Free Pascal port settings.  The library is compiled in Turbo Pascal mode
+ (-Mtp) with byte-packed records, as under Turbo Pascal.  None of the
+ DOS-only (real/protected mode, TSR, EMS, XMS, DPMI) options are supported.}
+  {$IFDEF FPC}
+    {$PACKRECORDS 1}
+    {$UNDEF Dpmi}
+    {$UNDEF OPWinTP}
+    {$DEFINE OPFPC}
+  {$ENDIF}

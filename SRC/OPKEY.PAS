@@ -1,6 +1,6 @@
 {$S-,R-,V-,I-,B-,F-,O-,A-}
 
-{$I OPDEFINE.INC}  {Just delete this if you don't have OPDEFINE.INC}
+{$I opdefine.inc}  {Just delete this if you don't have OPDEFINE.INC}
 
 {*********************************************************}
 {*                    OPKEY.PAS 1.30                     *}

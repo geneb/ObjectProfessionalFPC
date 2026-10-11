@@ -1,10 +1,10 @@
-{$IFDEF Windows}                                                      {!!.20}
+{$IFDEF OPWinTP}                                                      {!!.20}
   !! ERROR: This unit is not compatible with Windows applications !!  {!!.20}
 {$ENDIF}                                                              {!!.20}
 
 {$S-,R-,V-,I-,B-,F+,O+,A-}
 
-{$I OPDEFINE.INC}
+{$I opdefine.inc}
 
 {*********************************************************}
 {*                  OPABSFLD.PAS 1.30                    *}
@@ -295,8 +295,9 @@ implementation
       BooleanOnly, YesNoOnly,
       {$IFDEF UseDates}
       NameOnly, NameOnlyU,
-      MonthOnly, DayOnly, YearOnly, HourOnly, MinOnly, SecOnly,
-      MonthOnlyU, DayOnlyU, HourOnlyU, MinOnlyU, SecOnlyU, TimeOnly, EmOnly,
+      MonthOnly, DayOnly, YearOnly, HourOnly, SecOnly,
+      MonthOnlyU, DayOnlyU, HourOnlyU, SecOnlyU, TimeOnly, EmOnly,
+      {MinOnly/MinOnlyU equal MonthOnly/MonthOnlyU; FPC rejects duplicates}
       {$ENDIF}
       User1..User8];
   var
@@ -738,22 +739,12 @@ type
 
   function GetCountryInfo(var Dos2 : Boolean; var Info : CountryInfo) : Boolean;
     {-Return a country information table in Info}
-  var
-    Regs : Registers;
   begin
-    with Regs do begin
-      {get DOS version}
-      AX := $3000;
-      Intr($21, Regs);
-      Dos2 := (AL = 2);
-
-      {get pointer to country information table}
-      AX := $3800;
-      DS := Seg(Info);
-      DX := Ofs(Info);
-      Intr($21, Regs);
-      GetCountryInfo := not Odd(Flags);
-    end;
+    { FPC port: stubbed because the DOS country-info call has no equivalent here
+      (only compiled when UseDates is off; opdate has the RTL-based version) }
+    Dos2 := False;
+    FillChar(Info, SizeOf(Info), 0);
+    GetCountryInfo := False;
   end;
 
 {$ENDIF}

@@ -17,4 +17,3 @@ begin
   WriteLn(Lst, 'This output goes to LPT2 via BIOS services.');
   Close(Lst);
 end.
-

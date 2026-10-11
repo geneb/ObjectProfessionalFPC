@@ -220,7 +220,7 @@
     {-Display the status line for the file browser window}
   const
     StatusMsg =
-      '    Use cursor keys to browse, <Esc> to close help window ³ ';
+      '    Use cursor keys to browse, <Esc> to close help window '#$B3' ';
   begin
     with HelpWin do begin
       ShowStatusString(StatusMsg, 1, Length(StatusMsg));
@@ -389,7 +389,7 @@ const
       AddItem('Move',             02, 1, 02);
       AddItem('Resize',           03, 1, 03);
       AddItem('Zoom',             04, 1, 04);
-      AddSeparator('Ã', 'Ä', '´', 05);
+      AddSeparator(#$C3, #$C4, #$B4, 05);
       AddItem('Directory',        06, 1, 05);
         AddFramedSubMenu(4, 9, 11, 11, Vertical, DefWindowFrame);
         AddItem('Change',         01, 1, 06);
@@ -404,7 +404,7 @@ const
           AddItem('Hidden    Yes', 02, 1, 12);
           AddItem('Read-only Yes', 03, 1, 13);
           AddItem('System    Yes', 04, 1, 14);
-          AddSeparator('Ã', 'Ä', '´', 05);
+          AddSeparator(#$C3, #$C4, #$B4, 05);
           AddItem('Go',           06, 1, 15);
           ItemsDone;
         AddItem('Browse',         02, 1, 16);
@@ -512,8 +512,8 @@ const
     StatusMsg =
       {         1         2         3         4         5         6         7         }
       {1234567890123456789012345678901234567890123456789012345678901234567890123456789}
-      ' <F3> New mask  <F9> Menu ³ Disk:              Files:         Size:            ';
-      { <F3> New mask  <F9> Menu ³ Disk: 123,456,789  Files: 01,234  Size: 123,456,789}
+      ' <F3> New mask  <F9> Menu '#$B3' Disk:              Files:         Size:            ';
+      { <F3> New mask  <F9> Menu ? Disk: 123,456,789  Files: 01,234  Size: 123,456,789}
   var
     S : string[80];
   begin

@@ -1,11 +1,11 @@
 
-{$IFDEF Windows}                                                      {!!.20}
+{$IFDEF OPWinTP}                                                      {!!.20}
   !! ERROR: This unit is not compatible with Windows applications !!  {!!.20}
 {$ENDIF}                                                              {!!.20}
 
 {$S-,R-,V-,I-,B-,F+,O+,A-}
 
-{$I OPDEFINE.INC}
+{$I opdefine.inc}
 
 {*********************************************************}
 {*                   OPMACED.PAS 1.30                    *}
@@ -20,7 +20,6 @@ interface
 
 uses
   Dos,
-  Dpmi,      {!!.30}
   OpConst,   {!!.20}
   OpInline,
   OpCrt,
@@ -30,10 +29,9 @@ uses
   OpRoot,
   OpString, {!!.01}
   OpCmd,
-  OpInt,
   OpMacro;
 
-  {$I OPMACED.ICD}  {configuration data}
+  {$I opmaced.icd}  {configuration data}
 
 const
  NonMacroKey = $FFFF;        {if passed to EditKeys, Key is not translated into
@@ -70,12 +68,55 @@ var
   RegKeyLength,
   AuxKeyLength : array[0..255] of Byte;
 
-  {$L OPMACED.OBJ}
+  procedure ComputeScreenPos(KeyPtr : Word; var Row, Col : Word);
+    {-Compute the Row and Col positions for KeyPtr. FPC port of OPMACED.ASM}
+  var
+    K, Key, Len, R, C : Word;
+  begin
+    if KeyPtr < KnownKeyPtr then begin
+      K := 1;
+      R := LoRow;
+      C := LoCol;
+    end
+    else begin
+      K := KnownKeyPtr;
+      R := KnownRow;
+      C := KnownCol;
+    end;
 
-  {$F-}
-  procedure ComputeScreenPos(KeyPtr : Word; var Row, Col : Word); external;
-    {-Compute the Row and Col positions for KeyPtr}
-  {$F+}
+    while K <> KeyPtr do begin
+      Key := TempMacro.KeyArray[K];
+      if (Lo(Key) = 0) or (Lo(Key) = $E0) then
+        Len := AuxKeyLength[Hi(Key)]
+      else if Lo(Key) <= $1B then begin
+        case Key of
+          $0E08 : Len := 6;
+          $0F09 : Len := 5;
+          $1C0A : Len := 8;
+          $1C0D : Len := 7;
+          $011B : Len := 5;
+        else
+          Len := RegKeyLength[Lo(Key)];
+        end;
+      end
+      else
+        Len := RegKeyLength[Lo(Key)];
+
+      Inc(K);
+      if C+Len > HiCol then begin
+        Inc(R);
+        C := LoCol+Len;
+      end
+      else
+        Inc(C, Len);
+    end;
+
+    KnownKeyPtr := K;
+    KnownCol := C;
+    KnownRow := R;
+    Col := C;
+    Row := R;
+  end;
 
   function EditKeys(Key : Word; var Macro : MacroRec;
                     MinCol, MinRow, MaxCol, MaxRow,
@@ -87,7 +128,7 @@ var
   var
     ChWord : Word;
     Ch : Char absolute ChWord;
-    KbFlag : ^Byte {absolute $40 : $17}; {!!.30}
+    KbFlag : ^Byte; {FPC port: unused, BIOS data area flags read via KbdFlags}
     CurRow, CurCol, Width : Word;
     ScrollLock, LastScroll : Boolean;
     Done, Inserting : Boolean;
@@ -157,19 +198,16 @@ var
     const
       InsertBit  = $80;
     var
-      KeyboardFlags : Word absolute $40 : $17;
       {$IFDEF UseMouse}
       SaveMouse : Boolean;
       {$ENDIF}
     begin
-      if Inserting then begin
-        SetCursorType(InsertCursor);
-        SetFlag(KeyboardFlags, InsertBit);
-      end
-      else begin
+      {FPC port: the BIOS keyboard-flag insert bit cannot be set; only the
+       cursor shape is changed}
+      if Inserting then
+        SetCursorType(InsertCursor)
+      else
         SetCursorType(OvertypeCursor);
-        ClearFlag(KeyboardFlags, InsertBit);
-      end;
 
       {$IFDEF UseMouse}
       HideMousePrim(SaveMouse);
@@ -382,8 +420,7 @@ var
     KnownRow := MinRow;
     KnownCol := MinCol;
 
-    KbFlag := Ptr(BiosDataSele, $17);              {!!.30}
-    ScrollLock := (KbFlag^ and ScrollMask) <> 0;   {!!.30}
+    ScrollLock := (KbdFlags and ScrollMask) <> 0;
     LastScroll := not ScrollLock;
     RowAtTop := MinRow;
     RowAtBottom := MaxRow;
@@ -414,7 +451,7 @@ var
         GotoXYabs(CP, RP-(RowAtTop-MinRow));
         repeat
           {Watch the scroll state while waiting for a keystroke}
-          ScrollLock := (KbFlag^ and ScrollMask) <> 0; {!!.30}
+          ScrollLock := (KbdFlags and ScrollMask) <> 0;
           if ScrollLock <> LastScroll then begin
             ShowCommandMode;
             LastScroll := ScrollLock;

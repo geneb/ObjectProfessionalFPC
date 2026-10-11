@@ -1,6 +1,6 @@
 {$S-,R-,V-,I-,B-,F+,O+,A-}
 
-{$I OPDEFINE.INC}
+{$I opdefine.inc}
 
 {*********************************************************}
 {*                   OPEDIT.PAS 1.30                     *}
@@ -11,7 +11,7 @@
 unit OpEdit;
   {-Line editor and keyboard input routines}
 
-{$IFDEF Windows}                                                      {!!.20}
+{$IFDEF OPWinTP}                                                      {!!.20}
   !! ERROR: This unit is not compatible with Windows applications !!  {!!.20}
 {$ENDIF}                                                              {!!.20}
 
@@ -42,7 +42,7 @@ uses
   {$ENDIF}          {!!.03}
   ;
 
-  {$I OPEDIT.ICD}  {configuration data}
+  {$I opedit.icd}  {configuration data}
 
 const
   {----------- OPEDIT option codes -----------}
@@ -87,7 +87,7 @@ const
   leShowReadChar     = $10000000; {display the character pressed?}
   leHideCursor       = $20000000; {hide cursor?}
   leDefaultAccepted  = $40000000; {allow user to accept default?}
-  leMapExtended      = $80000000; {map extended keys?}
+  leMapExtended      = Low(LongInt); {map extended keys?}
 
   DefEditOptions     : LongInt = leCursorToEnd+leTrimBlanks+leClearFirstChar+
                                  leMapCtrls+leHouseCursorAtEnd;
@@ -104,7 +104,7 @@ const
                                    longints, integers, etc.--not reals}
   sleNoFieldMovement = $20000000; {don't allow field movement commands to exit}
   sleWindowRelative  = $40000000; {coordinates treated relative to current window?}
-  sleInsertByDefault = $80000000; {default to insert mode?}
+  sleInsertByDefault = Low(LongInt); {default to insert mode?}
 
   DefSecEditOptions  : LongInt = sleNoFieldMovement+sleInsertByDefault+
                                  ifNoMouseExit;

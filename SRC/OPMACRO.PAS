@@ -6,7 +6,7 @@
 {*                 All rights reserved.                  *}
 {*********************************************************}
 
-{$IFDEF Windows}                                                      {!!.20}
+{$IFDEF OPWinTP}                                                      {!!.20}
   !! ERROR: This unit is not compatible with Windows applications !!  {!!.20}
 {$ENDIF}                                                              {!!.20}
 
@@ -16,15 +16,19 @@
   {$C FIXED PRELOAD PERMANENT}                                        {!!.20}
 {$ENDIF}                                                              {!!.20}
 
-{$I OPDEFINE.INC}
+{$I opdefine.inc}
 
 unit OpMacro;
   {-Macro processing/recording routines.}
 
 interface
 
+{ FPC port: the INT $16 keyboard handler of the original is replaced by a hook
+  (OpKeyHk.KeyHook) that OPCRT's ReadKeyWord/CheckKbd call. The macro engine
+  (MacroKeyHook below) is a port of the INT16 routine in OPMACRO.ASM. }
+
 uses
-  Dos, OpInt;
+  Dos, OpKeyHk;
 
 const
   MaxMacros = 100;
@@ -162,27 +166,136 @@ function EscapeSequence(B : Byte) : StringPointer;
 
 implementation
 
+uses
+  SysUtils;
+
 const
-  Initialized : Boolean = False; {true if INT $16 handler installed}
+  Initialized : Boolean = False; {true if key hook installed}
   EndOfMacroProc : Pointer = nil;
 
-  {these two are needed by Int16}
   OurMaxMacros : Word = MaxMacros;
   OurMaxKeys : Word = MaxKeysInMacro;
+type
+  WordPtr = ^Word;
+  EndProc = procedure;
 var
   CurrentMacro : Pointer;    {Address of the macro in progress}
-  CurrentMacroOfs : Word absolute CurrentMacro;
-  CSToDSInc : Word; {!!.20}
   WaitCount : Byte; {!!.20}
   WaitFlag : Byte;  {!!.20}
+  SavedKeyHook : KeyHookFunc;
 
-  {$L OPMACRO.OBJ}
+  procedure RecordKey(K : Word);
+    {-Add K to ScrapMacro if recording and there is room}
+  begin
+    with ScrapMacro do
+      if NumKeys < OurMaxKeys then begin
+        Inc(NumKeys);
+        KeyArray[NumKeys] := K;
+        KeyArray[NumKeys+1] := EndOfMacro;
+      end;
+  end;
 
-  procedure Int16; external;
-    {-The macro engine. It takes over for BIOS INT $16.}
-  procedure Int16Init; external;
-    {-Initialization routine for Int16}
-  procedure SetWaitCount(Count : Byte); external; {!!.20}
+  function MacroKeyHook(Peek : Boolean; var Key : Word) : Boolean; far;
+    {-The macro engine. It takes over for BIOS INT $16 (function 0/1).
+      Peek = True behaves like "character ready", False like "read next".}
+  var
+    K : Word;
+    Consumed : Boolean;
+    I : Word;
+    P : WordPtr;
+    Proc : EndProc;
+  begin
+    Consumed := False;
+    K := 0;
+    repeat
+      if MacroInProgress then begin
+        P := WordPtr(CurrentMacro);
+        K := P^;
+        if K = EndOfMacro then begin
+          {at end of macro: stop it and call the user's procedure, if any}
+          MacroInProgress := False;
+          if EndOfMacroProc <> nil then begin
+            Proc := EndProc(EndOfMacroProc);
+            Proc;
+          end;
+          Continue;
+        end;
+
+        if Peek then begin
+          {pause WaitCount times before returning the next macro key}
+          if WaitCount <> 0 then begin
+            Inc(WaitFlag);
+            if WaitFlag <= WaitCount then begin
+              MacroKeyHook := False;
+              Exit;
+            end;
+            WaitFlag := 0;
+          end;
+          Key := K;
+          MacroKeyHook := True;
+          Exit;
+        end;
+
+        {remove the key from the macro}
+        CurrentMacro := Pointer(PtrUInt(CurrentMacro)+SizeOf(Word));
+        if PlaybackDelay <> 0 then
+          SysUtils.Sleep(PlaybackDelay);
+        if MacroRecording then
+          RecordKey(K);
+        Key := K;
+        MacroKeyHook := True;
+        Exit;
+      end;
+
+      {not in a macro: look at the real keyboard}
+      if not Consumed then begin
+        if Assigned(RawCheckKbdProc) and RawCheckKbdProc(K) then
+          {key waiting}
+        else if Peek then begin
+          MacroKeyHook := False;
+          Exit;
+        end
+        else begin
+          {nothing waiting: block for the next key}
+          K := RawReadKeyWordProc;
+          Consumed := True;
+        end;
+      end;
+
+      {see if the key starts a macro}
+      I := 0;
+      if MacrosAreOn and (K <> EndOfMacro) then
+        I := FindMacroIndex(K);
+      if I <> 0 then begin
+        {get rid of the key that caused the macro, then start the macro}
+        if not Consumed then
+          K := RawReadKeyWordProc;
+        Consumed := False;
+        CurrentMacro := Pointer(PtrUInt(MacroPointers[I])+SizeOf(Word));
+        MacroInProgress := True;
+        Continue;
+      end;
+
+      {ordinary key}
+      if not Peek then begin
+        if not Consumed then
+          K := RawReadKeyWordProc;
+        if MacroRecording then
+          RecordKey(K);
+      end;
+      Key := K;
+      MacroKeyHook := True;
+      Exit;
+    until False;
+  end;
+
+  procedure SetWaitCount(Count : Byte);
+    {-Set a wait count for CharReady calls during macro playback}
+  begin
+    if Count = 255 then
+      Dec(Count);               {255 reduced to 254 to avoid byte overflow}
+    WaitCount := Count;
+  end;
 
   procedure SetEndOfMacroProc(P : Pointer);
     {-Set pointer to procedure to call when end of macro reached}
@@ -229,12 +342,8 @@ var
         DefinedKeys[I] := EndOfMacro;
         MacroPointers[I] := nil;
       end
-      else begin
-        {clear interrupts, define new macro address, and restore interrupts}
-        InterruptsOff;
+      else
         MacroPointers[I] := @Macro;
-        InterruptsOn;
-      end;
       Exit;
     end;
 
@@ -279,6 +388,13 @@ var
     MacroCount := Count;
   end;
 
+  {FPC port: the FPC heap manager has no MaxAvail; allocation failure is
+   not detectable beforehand, so report "plenty"}
+  function MaxAvail : LongInt;
+  begin
+    MaxAvail := High(LongInt);
+  end;
+
   function AllocateMacro(Key : Word; var Macro; var Name : string) : Byte;
     {-Allocates a macro on the heap, and returns one of the following values:
        0 : Macro allocated
@@ -288,33 +404,24 @@ var
   var
     MacroLength : Word absolute Macro;
     NameLen : Byte absolute Name;
-    P, SaveMP : Pointer;
-    SaveLength : Word;
-    SaveFour : LongInt;
-    SaveName : string;
+    P, OldMP, OldName : Pointer;
     Index, I, N : Word;
   begin                                             {!!.12} {rewritten}
     {check for a blank macro}
     if MacroLength = 0 then
       AllocateMacro := 3
     else begin
-      {deallocate the existing macro, if any}
+      {FPC port: the old macro and name are released only after the new one
+       is safely defined, instead of being recovered afterwards}
       Index := FindMacroIndex(Key);
       if Index <> 0 then begin
-        SaveMP := MacroPointers[Index];
-        SaveFour := LongInt(SaveMP^);
-        SaveLength := (Word(SaveMP^) shl 1)+4;
-        FreeMem(SaveMP, SaveLength);
-        if MacroNames[Index] = nil then
-          SaveName := ''
-        else begin
-          SaveName := StringPointer(MacroNames[Index])^;
-          FreeMem(MacroNames[Index], Length(SaveName)+1);
-          MacroNames[Index] := nil;
-        end;
+        OldMP := MacroPointers[Index];
+        OldName := MacroNames[Index];
       end
-      else
-        SaveMP := nil;
+      else begin
+        OldMP := nil;
+        OldName := nil;
+      end;
 
       {the macro has a length word and an end word of $FFFF, so we need 4
        bytes more space than MacroLength}
@@ -327,7 +434,7 @@ var
         I := Succ(NameLen);
 
       {see if there's enough memory}
-      if MaxAvail >= LongInt(N+I) then begin
+      if MaxAvail >= LongInt(N)+LongInt(I) then begin
         {move the macro onto the heap}
         GetMem(P, N);
         Move(Macro, P^, N);
@@ -335,6 +442,14 @@ var
         {try to define it}
         if DefineMacro(Key, P^) then begin
           AllocateMacro := 0;
+
+          {release the old macro and name, if any}
+          if OldMP <> nil then
+            FreeMem(OldMP, (Word(OldMP^) shl 1)+4);
+          if OldName <> nil then begin
+            FreeMem(OldName, Succ(Byte(OldName^)));
+            MacroNames[Index] := nil;
+          end;
 
           {add the name, if any}
           if I <> 0 then begin
@@ -350,31 +465,9 @@ var
           FreeMem(P, N);
         end;
       end
-      else begin
-        {insufficient memory}
+      else
+        {insufficient memory; any existing macro is left untouched}
         AllocateMacro := 2;
-
-        {recover the old macro if there was one}
-        if SaveMP <> nil then begin
-          {recover the macro}
-          GetMem(P, SaveLength);
-          Move(SaveMP^, P^, SaveLength);
-          Move(SaveFour, P^, 4);
-
-          {clear interrupts, define new macro address, and restore interrupts}
-          InterruptsOff;
-          MacroPointers[Index] := P;
-          InterruptsOn;
-
-          {recover the name if there is one}
-          if SaveName <> '' then begin
-            N := Length(SaveName)+1;
-            GetMem(P, N);
-            Move(SaveName, P^, N);
-            MacroNames[Index] := P;
-          end;
-        end;
-      end;
     end;
   end;
 
@@ -632,18 +725,12 @@ ExitPoint:
   procedure MacroRecordingOn;
     {-Turns macro recording on}
   begin
-    {interrupts off while doing this}
-    InterruptsOff;
-
     {set the recording flag}
     MacroRecording := True;
 
     {make sure the scrap macro is empty}
     ScrapMacro.NumKeys := 0;
     ScrapMacro.KeyArray[1] := EndOfMacro;
-
-    {interrupts back on}
-    InterruptsOn;
   end;
 
   procedure MacroRecordingOff;
@@ -657,23 +744,14 @@ ExitPoint:
       progress it will immediately be replaced by the macro passed.}
   begin
     if Macro <> nil then begin
-      {turn interrupts off while doing this}
-      InterruptsOff;
-
-      {make this macro the current macro}
-      CurrentMacro := Macro;
-
-      {skip past the length word}
-      Inc(CurrentMacroOfs, 2);
+      {make this macro the current macro, skipping past the length word}
+      CurrentMacro := Pointer(PtrUInt(Macro)+SizeOf(Word));
 
       {Turn this macro on}
       MacroInProgress := True;
 
       {Start the wait cycle over again} {!!.20}
       WaitFlag := 0;  {!!.20}
-
-      {restore interrupts}
-      InterruptsOn;
     end;
   end;
 
@@ -691,7 +769,8 @@ ExitPoint:
     MacroInProgress := False;
     MacrosAreOn := False;
     MacroRecording := False;
-    RestoreVector(Int16Handle);
+    if Initialized then
+      KeyHook := SavedKeyHook;
     Initialized := False;
   end;
 
@@ -715,21 +794,199 @@ ExitPoint:
   var
     CharCode : Byte absolute MacroChar;
   begin
-    case MacroChar of
-      ^M : CharToMacro := $1C0D;
-      ^[ : CharToMacro := $011B;  {!!.13}
-      #0..'?' : CharToMacro := (ScanCodes[CharCode] shl 8) or CharCode;
-      '@'..'_' : CharToMacro := (ScanCodes[CharCode-64] shl 8) or CharCode;
-      '`', '~' : CharToMacro := $2900 or CharCode;
-      'a'..'}' : CharToMacro := (ScanCodes[CharCode-96] shl 8) or CharCode;
-      #127 : CharToMacro := $0EFF;
-    else CharToMacro := CharCode;
-    end;
+    {FPC port: ^M and ^[ handled first, FPC rejects overlapping case labels}
+    if MacroChar = ^M then
+      CharToMacro := $1C0D
+    else if MacroChar = ^[ then
+      CharToMacro := $011B  {!!.13}
+    else
+      case MacroChar of
+        #0..'?' : CharToMacro := (ScanCodes[CharCode] shl 8) or CharCode;
+        '@'..'_' : CharToMacro := (ScanCodes[CharCode-64] shl 8) or CharCode;
+        '`', '~' : CharToMacro := $2900 or CharCode;
+        'a'..'}' : CharToMacro := (ScanCodes[CharCode-96] shl 8) or CharCode;
+        #127 : CharToMacro := $0EFF;
+      else CharToMacro := CharCode;
+      end;
   end;
 
   function EscapeSequence(B : Byte) : StringPointer;
     {-Return a pointer to a string representing extended scan code B}
-  external;
+  const
+    Keys : array[0..165] of string[9] = (
+      '^Break',
+      'AltEsc',
+      '?',
+      '^@',
+      '?',
+      '?',
+      '?',
+      '?',
+      '?',
+      '?',
+      '?',
+      '?',
+      '?',
+      '?',
+      'AltBksp',
+      'ShTab',
+      'AltQ',
+      'AltW',
+      'AltE',
+      'AltR',
+      'AltT',
+      'AltY',
+      'AltU',
+      'AltI',
+      'AltO',
+      'AltP',
+      'Alt[',
+      'Alt]',
+      'AltEnter',
+      'Ctrl',
+      'AltA',
+      'AltS',
+      'AltD',
+      'AltF',
+      'AltG',
+      'AltH',
+      'AltJ',
+      'AltK',
+      'AltL',
+      'Alt;',
+      'Alt''',
+      'Alt`',
+      'LShift',
+      'Alt\',
+      'AltZ',
+      'AltX',
+      'AltC',
+      'AltV',
+      'AltB',
+      'AltN',
+      'AltM',
+      'Alt,',
+      'Alt.',
+      'Alt/',
+      'RShift',
+      'PrtSc',
+      'Alt',
+      'Space',
+      'CapLock',
+      'F1',
+      'F2',
+      'F3',
+      'F4',
+      'F5',
+      'F6',
+      'F7',
+      'F8',
+      'F9',
+      'F10',
+      'NumLock',
+      'ScrLock',
+      'Home',
+      'Up',
+      'PgUp',
+      'Minus',
+      'Left',
+      'Center',
+      'Right',
+      'Plus',
+      'End',
+      'Down',
+      'PgDn',
+      'Ins',
+      'Del',
+      'ShF1',
+      'ShF2',
+      'ShF3',
+      'ShF4',
+      'ShF5',
+      'ShF6',
+      'ShF7',
+      'ShF8',
+      'ShF9',
+      'ShF10',
+      '^F1',
+      '^F2',
+      '^F3',
+      '^F4',
+      '^F5',
+      '^F6',
+      '^F7',
+      '^F8',
+      '^F9',
+      '^F10',
+      'AltF1',
+      'AltF2',
+      'AltF3',
+      'AltF4',
+      'AltF5',
+      'AltF6',
+      'AltF7',
+      'AltF8',
+      'AltF9',
+      'AltF10',
+      '^PrtSc',
+      '^Left',
+      '^Right',
+      '^End',
+      '^PgDn',
+      '^Home',
+      'Alt1',
+      'Alt2',
+      'Alt3',
+      'Alt4',
+      'Alt5',
+      'Alt6',
+      'Alt7',
+      'Alt8',
+      'Alt9',
+      'Alt0',
+      'Alt-',
+      'Alt=',
+      '^PgUp',
+      'F11',
+      'F12',
+      'ShF11',
+      'ShF12',
+      '^F11',
+      '^F12',
+      'AltF11',
+      'AltF12',
+      '^Up',
+      '^Minus',
+      '^Center',
+      '^Plus',
+      '^Down',
+      '^Ins',
+      '^Del',
+      '^Tab',
+      '?',
+      '?',
+      'AltHome',
+      'AltUp',
+      'AltPgUp',
+      '?',
+      'AltLeft',
+      'AltCenter',
+      'AltRight',
+      '?',
+      'AltEnd',
+      'AltDown',
+      'AltPgDn',
+      'AltIns',
+      'AltDel',
+      '?',
+      'AltTab'
+    );
+  begin
+    {FPC port: B > 165 returns the "?" entry, as in OPMACRO.ASM}
+    if B > 165 then
+      B := 2;
+    EscapeSequence := @Keys[B];
+  end;
 
   procedure KeyToString(Key : Word; var S : string; var Special : Boolean);
     {-Returns a string (S) representing a Key. Special is set to False if
@@ -788,8 +1045,10 @@ ExitPoint:
     ScrapMacro.NumKeys := 0;
     ScrapMacro.KeyArray[1] := EndOfMacro;
 
-    {we're initialized if the ISR can be installed}
-    Initialized := InitVector($16, Int16Handle, @Int16);
+    {we're initialized once the key hook is installed}
+    SavedKeyHook := KeyHook;
+    KeyHook := KeyHookFunc(@MacroKeyHook);
+    Initialized := True;
 
     InitMacros := Initialized;
   end;
@@ -806,7 +1065,7 @@ ExitPoint:
       NumKeys := SLen;
       for I := 1 to SLen do
         KeyArray[I] := CharToMacro(S[I]);
-      KeyArray[I+1] := EndOfMacro;
+      KeyArray[SLen+1] := EndOfMacro;
     end;
   end;
 
@@ -817,16 +1076,7 @@ ExitPoint:
   end;
 
 begin
-  {$IFDEF Dpmi}                 {!!.20}
-  CSToDSInc := SelectorInc;     {!!.20}
-  {$ELSE}                       {!!.20}
-  CSToDSInc := 0;               {!!.20}
-  {$ENDIF}                      {!!.20}
-
-  {initialization routine needed for Int16 to work}
-  Int16Init;
-
-  {install interrupt handler and initialize data structures}
+  {install key hook and initialize data structures}
   if not InitMacros then
     Halt(1);
 end.

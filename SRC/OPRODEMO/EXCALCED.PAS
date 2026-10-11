@@ -2,7 +2,7 @@
 
 program ExCalcEd;
 
-{$I OPDEFINE.INC}
+{$I opdefine.inc}
 
 uses
   Dos,
@@ -102,7 +102,7 @@ var
                            var UR : UserRecord;
                            var EsColors : ColorSet) : Word;
   const
-    Frame1 = 'ÚÀ¿ÙÄÄ³³';
+    Frame1 = #$DA#$C0#$BF#$D9#$C4#$C4#$B3#$B3;
     WinOptions = wBordered+wClear+wUserContents;
   begin
     with ES do begin
@@ -203,4 +203,3 @@ begin
   WriteLn('Exit command = ', ES.GetLastCommand);
   ES.Done;
 end.
-

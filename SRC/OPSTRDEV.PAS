@@ -4,7 +4,7 @@
   {$C FIXED PRELOAD PERMANENT}              {!!.20}
 {$ENDIF}                                    {!!.20}
 
-{$I OPDEFINE.INC}
+{$I opdefine.inc}
 
 {*********************************************************}
 {*                  OPSTRDEV.PAS 1.30                    *}
@@ -30,84 +30,70 @@ function ReturnStr : string;
 
 implementation
 
-type
-  {text buffer}
-  TextBuffer = array[0..65520] of Byte;
+uses
+  Dos;
 
-  {structure of a Turbo File Interface Block}
-  FIB =
-    record
-      Handle : Word;
-      Mode : Word;
-      BufSize : Word;
-      Private : Word;
-      BufPos : Word;
-      BufEnd : Word;
-      BufPtr : ^TextBuffer;
-      OpenProc : Pointer;
-      InOutProc : Pointer;
-      FlushProc : Pointer;
-      CloseProc : Pointer;
-      UserData : array[1..16] of Byte;
-      Name : array[0..79] of Char;
-      Buffer : array[0..127] of Char;
-    end;
-const
-  FMClosed = $D7B0;
 var
   StrBuf : string;
   StrLen : Byte absolute StrBuf;
 
+  {FPC port: the TP File Interface Block hack is replaced by an FPC text-file
+   driver (TextRec with custom Open/InOut/Flush/Close functions)}
+
   procedure ReadStr(var S : string);
     {-'Read' a string into S from our string buffer}
   begin
+    if TextRec(TPStr).BufPos > 0 then
+      StrLen := TextRec(TPStr).BufPos;
     S := StrBuf;
     StrLen := 0;
-    with FIB(TPStr) do
-      BufPos := 0;
+    TextRec(TPStr).BufPos := 0;
   end;
 
   function ReturnStr : string;
     {-Return the contents of our string buffer}
   begin
+    if TextRec(TPStr).BufPos > 0 then
+      StrLen := TextRec(TPStr).BufPos;
     ReturnStr := StrBuf;
     StrLen := 0;
-    with FIB(TPStr) do
-      BufPos := 0;
+    TextRec(TPStr).BufPos := 0;
   end;
 
-  function StrOut(var F : FIB) : Word;
+  function StrOut(var F : TextRec) : LongInt;
     {-Update the length byte of StrBuf}
   begin
-    {update the length byte}
-    with F do
-      StrLen := BufPos;
-
-    {return success flag}
+    if F.BufPos > 0 then
+      StrLen := F.BufPos;
+    F.BufPos := 0;
     StrOut := 0;
   end;
 
-  function StrZero(var F : FIB) : Word;
+  function StrZero(var F : TextRec) : LongInt;
     {-Return success flag, but do nothing}
   begin
     StrZero := 0;
   end;
 
-  procedure AssignStr(var F : Text);
-    {-Initialize the File Interface Block}
+  function StrOpen(var F : TextRec) : LongInt;
   begin
-    with FIB(F) do begin
-      Mode := FMClosed;
-      OpenProc := @StrZero;
-      FlushProc := @StrOut;
-      CloseProc := @StrZero;
-      InOutProc := @StrOut;
-      BufEnd := 0;
-      BufPos := 0;
-      BufPtr := @StrBuf[1];
-      BufSize := 255;
-      Name[0] := #0;
-    end;
+    F.Mode := fmOutput;
+    F.InOutFunc := @StrOut;
+    F.FlushFunc := @StrOut;
+    F.CloseFunc := @StrZero;
+    F.BufPtr := @StrBuf[1];
+    F.BufSize := 255;
+    F.BufPos := 0;
+    F.BufEnd := 0;
+    StrOpen := 0;
+  end;
+
+  procedure AssignStr(var F : Text);
+    {-Initialize the text file driver}
+  begin
+    Assign(F, 'STRDEV');
+    TextRec(F).Mode := fmClosed;
+    TextRec(F).OpenFunc := @StrOpen;
 
     {start with an empty string buffer}
     StrLen := 0;

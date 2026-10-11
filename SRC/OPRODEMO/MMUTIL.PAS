@@ -1,6 +1,6 @@
 {$R-,S-,I-,V-,B-,F+,O+}
 
-{$I OPDEFINE.INC}
+{$I opdefine.inc}
 
 {***************************************************************************
  This unit requires that OPDEFINE.INC activate the following defines:
@@ -54,10 +54,10 @@ const
   YesChar    = 'Y';
   NoChar     = 'N';
 
-  SliderChar    = '²';
-  ScrollBarChar = '°' {'±'};
+  SliderChar    = #$B2;
+  ScrollBarChar = #$B0 {'?'};
   BackdropAttr  = $07;
-  BackdropChar  = '°' {'±'};
+  BackdropChar  = #$B0 {'?'};
 
   {colors}
   MainColors : ColorSet = (
@@ -163,12 +163,12 @@ type
     {-Restore cursor state as saved by SaveAllCursors}
 
 const
-  SglCrossBar = 'Ä';
-  SglLeftTee  = 'Ã';
-  SglRightTee = '´';
-  DblCrossBar = 'Í';
-  DblLeftTee  = 'Æ';
-  DblRightTee = 'µ';
+  SglCrossBar = #$C4;
+  SglLeftTee  = #$C3;
+  SglRightTee = #$B4;
+  DblCrossBar = #$CD;
+  DblLeftTee  = #$C6;
+  DblRightTee = #$B5;
   DefCrossBar : Char = SglCrossBar;
   DefLeftTee  : Char = SglLeftTee;
   DefRightTee : Char = SglRightTee;
@@ -297,83 +297,83 @@ implementation
 const
   MaxHorizSpanTypes = 30;
   HorizSpanTypes : array[1..MaxHorizSpanTypes] of SpanCharArray = (
-    'ÃÄ´',               {single}
-    'ÌÍ¹',               {double}
-    'ÆÍµ',               {mixed #1}
-    'ÇÄ¶',               {mixed #2}
+    #$C3#$C4#$B4,               {single}
+    #$CC#$CD#$B9,               {double}
+    #$C6#$CD#$B5,               {mixed #1}
+    #$C7#$C4#$B6,               {mixed #2}
 
-    '³Ä³',               {single unjoined}
-    'ºÍº',               {double unjoined}
-    '³Í³',               {mixed unjoined #1}
-    'ºÄº',               {mixed unjoined #2}
+    #$B3#$C4#$B3,               {single unjoined}
+    #$BA#$CD#$BA,               {double unjoined}
+    #$B3#$CD#$B3,               {mixed unjoined #1}
+    #$BA#$C4#$BA,               {mixed unjoined #2}
 
-    'ÚÄ¿',               {downward single join}
-    'ÉÍ»',               {downward double join}
-    'ÕÍ¸',               {downward mixed join #1}
-    'ÖÄ·',               {downward mixed join #2}
+    #$DA#$C4#$BF,               {downward single join}
+    #$C9#$CD#$BB,               {downward double join}
+    #$D5#$CD#$B8,               {downward mixed join #1}
+    #$D6#$C4#$B7,               {downward mixed join #2}
 
-    'ÀÄÙ',               {upward single join}
-    'ÈÍ¼',               {upward double join}
-    'ÔÍ¾',               {upward mixed join #1}
-    'ÓÄ½',               {upward mixed join #2}
+    #$C0#$C4#$D9,               {upward single join}
+    #$C8#$CD#$BC,               {upward double join}
+    #$D4#$CD#$BE,               {upward mixed join #1}
+    #$D3#$C4#$BD,               {upward mixed join #2}
 
-    'ÄÄÄ',               {single all horizontal}
-    'ÍÍÍ',               {double all horizontal}
+    #$C4#$C4#$C4,               {single all horizontal}
+    #$CD#$CD#$CD,               {double all horizontal}
 
     '+-+',               {printable ASCII}
 
-    'ÛÛÛ',               {solid block}
-    '°°°',               {polka-dot block #1}
-    '±±±',               {polka-dot block #2}
-    '²²²',               {polka-dot block #3}
+    #$DB#$DB#$DB,               {solid block}
+    #$B0#$B0#$B0,               {polka-dot block #1}
+    #$B1#$B1#$B1,               {polka-dot block #2}
+    #$B2#$B2#$B2,               {polka-dot block #3}
 
-    'þþþ',               {squares}
+    #$FE#$FE#$FE,               {squares}
     '***',               {asterisks}
     ^O^O^O,              {snowflakes}
     ^D^D^D,              {diamonds}
     ^G^G^G,              {dots 1}
-    'ùùù',               {dots 2}
-    'úúú');              {dots 3}
+    #$F9#$F9#$F9,               {dots 2}
+    #$FA#$FA#$FA);              {dots 3}
 
   MaxVertSpanTypes = 30;
   VertSpanTypes : array[1..MaxVertSpanTypes] of SpanCharArray = (
-    'Â³Á',               {single}
-    'ËºÊ',               {double}
-    'ÒºÐ',               {mixed #1}
-    'Ñ³Ï',               {mixed #2}
+    #$C2#$B3#$C1,               {single}
+    #$CB#$BA#$CA,               {double}
+    #$D2#$BA#$D0,               {mixed #1}
+    #$D1#$B3#$CF,               {mixed #2}
 
-    'Ä³Ä',               {single unjoined}
-    'ÍºÍ',               {double unjoined}
-    'ÄºÄ',               {mixed unjoined #1}
-    'Í³Í',               {mixed unjoined #2}
+    #$C4#$B3#$C4,               {single unjoined}
+    #$CD#$BA#$CD,               {double unjoined}
+    #$C4#$BA#$C4,               {mixed unjoined #1}
+    #$CD#$B3#$CD,               {mixed unjoined #2}
 
-    'Ú³À',               {rightward single join}
-    'ÉºÈ',               {rightward double join}
-    'ÖºÓ',               {rightward mixed #1}
-    'Õ³Ô',               {rightward mixed #2}
+    #$DA#$B3#$C0,               {rightward single join}
+    #$C9#$BA#$C8,               {rightward double join}
+    #$D6#$BA#$D3,               {rightward mixed #1}
+    #$D5#$B3#$D4,               {rightward mixed #2}
 
-    '¿³Ù',               {leftward single join}
-    '»º¼',               {leftward double join}
-    '·º½',               {leftward mixed #1}
-    '¸³¾',               {leftward mixed #2}
+    #$BF#$B3#$D9,               {leftward single join}
+    #$BB#$BA#$BC,               {leftward double join}
+    #$B7#$BA#$BD,               {leftward mixed #1}
+    #$B8#$B3#$BE,               {leftward mixed #2}
 
-    '³³³',               {single all vertical}
-    'ººº',               {double all vertical}
+    #$B3#$B3#$B3,               {single all vertical}
+    #$BA#$BA#$BA,               {double all vertical}
 
     '+|+',               {printable ASCII}
 
-    'ÛÛÛ',               {solid block}
-    '°°°',               {polka-dot block #1}
-    '±±±',               {polka-dot block #2}
-    '²²²',               {polka-dot block #3}
+    #$DB#$DB#$DB,               {solid block}
+    #$B0#$B0#$B0,               {polka-dot block #1}
+    #$B1#$B1#$B1,               {polka-dot block #2}
+    #$B2#$B2#$B2,               {polka-dot block #3}
 
-    'þþþ',               {squares}
+    #$FE#$FE#$FE,               {squares}
     '***',               {asterisks}
     ^O^O^O,              {snowflakes}
     ^D^D^D,              {diamonds}
     ^G^G^G,              {dots 1}
-    'ùùù',               {dots 2}
-    'úúú');              {dots 3}
+    #$F9#$F9#$F9,               {dots 2}
+    #$FA#$FA#$FA);              {dots 3}
 
 var
   Popup : StackWindow;       {Window used for getting responses}

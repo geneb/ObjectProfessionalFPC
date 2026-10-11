@@ -767,21 +767,21 @@ type
     {-Return join characters given characters on orthogonal edges of frame}
   const             {Span,NonSpan}
     FirstJoin : array[1..4, 1..4] of Char =
-    (('Ä', 'Í', 'Ã', 'Ç'),
-     ('Ä', 'Í', 'Æ', 'Ì'),
-     ('Â', 'Ñ', '³', 'º'),
-     ('Ò', 'Ë', '³', 'º'));
+    ((#$C4, #$CD, #$C3, #$C7),
+     (#$C4, #$CD, #$C6, #$CC),
+     (#$C2, #$D1, #$B3, #$BA),
+     (#$D2, #$CB, #$B3, #$BA));
     LastJoin :  array[1..4, 1..4] of Char =
-    (('Ä', 'Í', '´', '¶'),
-     ('Ä', 'Í', 'µ', '¹'),
-     ('Á', 'Ï', '³', 'º'),
-     ('Ð', 'Ê', '³', 'º'));
+    ((#$C4, #$CD, #$B4, #$B6),
+     (#$C4, #$CD, #$B5, #$B9),
+     (#$C1, #$CF, #$B3, #$BA),
+     (#$D0, #$CA, #$B3, #$BA));
   var
     SpanIndex : Byte;
     NonSpanIndex : Byte;
   begin
-    SpanIndex := Pos(SpanChar, 'ÄÍ³º');
-    NonSpanIndex := Pos(NonSpanChar, 'ÄÍ³º');
+    SpanIndex := Pos(SpanChar, #$C4#$CD#$B3#$BA);
+    NonSpanIndex := Pos(NonSpanChar, #$C4#$CD#$B3#$BA);
     if (NonSpanIndex = 0) or (SpanIndex = 0) then begin
       FirstChar := SpanChar;
       LastChar := SpanChar;
@@ -812,7 +812,7 @@ type
                   {Span goes horizontal}
                   SpanChar := frChars[frTT];
                   if SpanChar = NoFrameChar then
-                    SpanChar := 'Ä';
+                    SpanChar := #$C4;
                   NonSpanChar := frChars[frLL];
                 end;
               frLL, frRR :
@@ -820,7 +820,7 @@ type
                   {Span goes vertical}
                   SpanChar := frChars[frLL];
                   if SpanChar = NoFrameChar then
-                    SpanChar := '³';
+                    SpanChar := #$B3;
                   NonSpanChar := frChars[frTT];
                 end;
             end;
@@ -1697,7 +1697,7 @@ type
             {Span goes horizontal}
             SpanChar := wFrame.frChars[frTT];
             if SpanChar = NoFrameChar then
-              SpanChar := 'Ä';
+              SpanChar := #$C4;
             NonSpanChar := wFrame.frChars[frLL];
             if DisplayPos > Height then
               DisplayPos := Height;
@@ -1705,7 +1705,7 @@ type
             {Span goes vertical}
             SpanChar := wFrame.frChars[frLL];
             if SpanChar = NoFrameChar then
-              SpanChar := '³';
+              SpanChar := #$B3;
             NonSpanChar := wFrame.frChars[frTT];
             if DisplayPos > Width then
               DisplayPos := Width;

@@ -1,10 +1,10 @@
-{$IFDEF Windows}
+{$IFDEF OPWinTP}
   !! ERROR - This unit is not compatible with Windows !!
 {$ENDIF}
 
 {$R-,S-,I-,V-,B-,F+,O+,A-} {!!.01}
 
-{$I OPDEFINE.INC}
+{$I opdefine.inc}
 
 {*********************************************************}
 {*                   OPCAL.PAS 1.30                      *}
@@ -36,14 +36,14 @@ uses
   oppick,
   opdate;
 
-  {$I OPCAL.ICD}  {configuration data}
+  {$I opcal.icd}  {configuration data}
 
 const
   CalendarWidth  = 29;     {width of calendar}
   CalendarHeight = 11;     {height of calendar}
-  DefCrossBar    : Char = 'Ä';
-  DefLeftTee     : Char = 'Ã';
-  DefRightTee    : Char = '´';
+  DefCrossBar    : Char = #$C4;
+  DefLeftTee     : Char = #$C3;
+  DefRightTee    : Char = #$B4;
   DaysOfTheWeek  : string[CalendarWidth] = ' Sun Mon Tue Wed Thu Fri Sat ';
 type
   CalArray = array[1..42] of Byte;

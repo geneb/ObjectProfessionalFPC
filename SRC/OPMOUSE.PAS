@@ -1,14 +1,4 @@
-{$IFDEF Windows}
-  !! ERROR - This unit is not compatible with Windows !!
-{$ENDIF}
-
-{$S-,R-,V-,I-,B-,F+,O-,A-}
-
-{$IFDEF Dpmi}                               {!!.20}
-  {$C FIXED PRELOAD PERMANENT}              {!!.20}
-{$ENDIF}                                    {!!.20}
-
-{$I OPDEFINE.INC}
+{$I opdefine.inc}
 
 {*********************************************************}
 {*                   OPMOUSE.PAS 1.30                    *}
@@ -17,15 +7,34 @@
 {*********************************************************}
 
 unit OpMouse;
-  {-Mouse interface routines. Designed for use in text mode only.}
+  {-Mouse interface routines. Designed for use in text mode only.
+
+    FPC port notes: the INT $33 driver interface (OPMOUSE.ASM/OPMOUSE2.ASM)
+    is re-implemented on FPC's Mouse unit. Mouse events are polled (at
+    MousePressed, MouseKeyWord, MouseWhere*, MouseGotoXY, MouseButton* and
+    friends) and the user event routine (MouseRoutine) is called from that
+    polling point instead of from an interrupt. All coordinates keep their
+    original meaning (1-based character cells, relative to the mouse window
+    unless "abs").
+
+    The mouse cursor is drawn the way the text mode driver did it: by
+    modifying the cell under the pointer in OPCRT's physical screen buffer
+    (VideoBuffer). The original cell is restored when the pointer moves or is
+    hidden.
+
+    FPC port: stubbed because there is no driver to talk to:
+      - HardMouseCursor: the hardware cursor shape cannot be set per mouse;
+        it is emulated with the default software cursor (attribute inversion,
+        $FFFF/$7700) and a start line >= $20 hides the cursor
+      - GetMickeyCount/SetMickeyToPixelRatio: mickeys are estimated from
+        character cell movement; the ratio has no effect on pointer speed
+      - GetMousePage/SetMousePage: single page only
+      - MouseStateBufferSize/SaveMouseState/RestoreMouseState: no driver
+        state exists, so the size is 0 and save/restore do nothing}
 
 interface
 
 uses
-  Dpmi,         {!!.20}
-{$IFDEF Dpmi}   {!!.20}
-  WinApi,       {!!.20}
-{$ENDIF}        {!!.20}
   OpCrt;
 
 var
@@ -203,10 +212,10 @@ procedure SetMickeyToPixelRatio(Horizontal, Vertical : Integer);
 
 procedure SetMouseEventHandler(EventMask : MouseEventType; UserRoutine : Pointer);
   {-Sets the address of a routine to be called when the specified mouse
-    events occur. OPMOUSE handles the saving of the mouse driver's registers
-    and sets up the DS register for the UserRoutine. Information about the
-    Event is passed to UserRoutine using the global variables MouseEvent,
-    MouseStatus, MouseLastX, and MouseLastY}
+    events occur. FPC port: the routine (a plain "procedure;") is called
+    from the polling points listed in the unit header, not from an
+    interrupt. Information about the Event is passed to UserRoutine using the
+    global variables MouseEvent, MouseStatus, MouseLastX, and MouseLastY}
 
   {-- The remaining routines may not be implemented by all mouse drivers!! --}
 
@@ -240,130 +249,292 @@ procedure ShowMousePrim(MouseState : Boolean);
 
 implementation
 
-type
-  {for typecasting in save/restore state calls}
-  SO =
-    record
-      O, S : Word;
-    end;
+uses
+  SysUtils,
+  Mouse;
 
-  HiLo =
-    record
-      LoWord, HiWord : Word;
-    end;
+type
+  CellArray = array[0..65534] of Word;
+  CellPtr = ^CellArray;
+  EventProc = procedure;
 
 var
   SaveExitProc : Pointer;
   EventHandlerInstalled : Boolean;
+  MouseStarted : Boolean;      {Mouse unit initialized}
+  InPoll : Boolean;            {guards against re-entry from MouseRoutine}
 
-  {$L OPMOUSE.OBJ}
-  {$L OPMOUSE2.OBJ}
-  procedure InitializeMouse;
-    external {OPMOUSE.OBJ};
-  procedure ShowMouseLow;
-    external {OPMOUSE.OBJ};
-  procedure HideMouseLow;
-    external {OPMOUSE.OBJ};
-  procedure MouseWhereXY(var MouseX, MouseY : Byte;
-                         var Status : ButtonStatus);
-    external {OPMOUSE2.OBJ};
-  function MouseWhereX : Byte;
-    external {OPMOUSE2.OBJ};
-  function MouseWhereY : Byte;
-    external {OPMOUSE2.OBJ};
-  procedure MouseGotoXY(MouseX, MouseY : Byte);
-    external {OPMOUSE2.OBJ};
-  function MouseButtonPressed(Button : ButtonStatus;
-                              var Count : Word;
-                              var LastX, LastY : Byte) : Boolean;
-    external {OPMOUSE2.OBJ};
-  function MouseButtonReleased(Button : ButtonStatus;
-                               var Count : Word;
-                               var LastX, LastY : Byte) : Boolean;
-    external {OPMOUSE2.OBJ};
-  procedure MouseWindow(XLow, YLow, XHigh, YHigh : Byte);
-    external {OPMOUSE.OBJ};
-  procedure SoftMouseCursor(ScreenMask, CursorMask : Word);
-    external {OPMOUSE2.OBJ};
-  procedure HardMouseCursor(StartLine, EndLine : Word);
-    external {OPMOUSE2.OBJ};
-  function GetMousePage : Byte;
-    external {OPMOUSE2.OBJ};
-  procedure SetMousePage(Page : Byte);
-    external {OPMOUSE2.OBJ};
-  procedure GetMickeyCount(var Horizontal, Vertical : Integer);
-    external {OPMOUSE2.OBJ};
-  procedure SetMickeyToPixelRatio(Horizontal, Vertical : Integer);
-    external {OPMOUSE2.OBJ};
+  CurX, CurY : Integer;        {pointer position, 0-based absolute cell}
+  Buttons : Byte;              {current button bits: 1 left, 2 right, 4 center}
+  PressCnt, ReleaseCnt : array[0..2] of Word;
+  PressX, PressY, ReleaseX, ReleaseY : array[0..2] of Byte;
 
-  {these procedures, used internally, are all called FAR}
-  procedure MouseEventPrim(EventMask : MouseEventType; UserRoutine : Pointer);
-    external {OPMOUSE2.OBJ};
-  procedure MouseEventHandler;
-    external {OPMOUSE2.OBJ};
-  function GetStorageSize : Word;
-    {-Returns amount of memory needed to save state of mouse driver}
-    external {OPMOUSE.OBJ};
-  procedure SaveMouseStatePrim(var Buffer);
-    {-Save mouse state in Buffer}
-    external {OPMOUSE.OBJ};
-  procedure RestoreMouseStatePrim(var Buffer);
-    {-Restore mouse state from Buffer}
-    external {OPMOUSE.OBJ};
+  CursorSoft : Boolean;        {software cursor (else emulated hardware)}
+  ScrMask, CurMask : Word;
+  HardStart : Word;
+  Drawn : Boolean;             {cursor currently drawn into the buffer}
+  DrawnIdx : Longint;
+  DrawnCell, SavedCell : Word;
 
-  {these procedures, used internally, are all called NEAR}
-  procedure ScaleUpY;
-    external {OPMOUSE.OBJ};
-  procedure ScaleUpX;
-    external {OPMOUSE.OBJ};
-  procedure ScaleDownY;
-    external {OPMOUSE.OBJ};
-  procedure ScaleDownX;
-    external {OPMOUSE.OBJ};
+  MickX, MickY : Integer;      {cell movement since GetMickeyCount}
+  RatioX : Integer;
+  RatioY : Integer;
 
-{$IFDEF Dpmi}  {!!.20 - new for protected mode}
-  function GetStorageSizePM : Word;
-  var
-    DR : DPMIRegisters;
+  function CellCount : Longint;
   begin
-    FillChar(DR, SizeOf(DR), 0);
-    DR.AX := 21;
-    if SimulateRealModeInt($33, DR) <> 0 then
-      GetStorageSizePM := 0
+    CellCount := Longint(ScreenWidth)*Longint(ScreenHeight);
+  end;
+
+  procedure EraseCursor;
+    {-Put back the cell under the cursor, unless the program overwrote it}
+  var
+    Cells : CellPtr;
+  begin
+    if Drawn then begin
+      Drawn := False;
+      Cells := CellPtr(VideoBuffer);
+      if (Cells <> nil) and (DrawnIdx < CellCount) then
+        if Cells^[DrawnIdx] = DrawnCell then
+          Cells^[DrawnIdx] := SavedCell;
+    end;
+  end;
+
+  procedure DrawCursor;
+    {-Draw the cursor by modifying the cell under the pointer}
+  var
+    Cells : CellPtr;
+    Idx : Longint;
+    Old, New : Word;
+  begin
+    if Drawn or not MouseCursorOn or not MouseInstalled then
+      Exit;
+    Cells := CellPtr(VideoBuffer);
+    if Cells = nil then
+      Exit;
+    Idx := Longint(CurY)*Longint(ScreenWidth)+CurX;
+    if (Idx < 0) or (Idx >= CellCount) then
+      Exit;
+    Old := Cells^[Idx];
+    if CursorSoft then
+      New := (Old and ScrMask) xor CurMask
+    else if HardStart >= $20 then
+      New := Old
     else
-      GetStorageSizePM := DR.BX;
+      New := (Old and DefaultScreenMask) xor DefaultCursorMask;
+    if New <> Old then begin
+      Cells^[Idx] := New;
+      Drawn := True;
+      DrawnIdx := Idx;
+      DrawnCell := New;
+      SavedCell := Old;
+    end;
   end;
 
-  procedure SaveMouseStatePM(Buffer : Pointer);
-  var
-    DR : DPMIRegisters;
+  procedure Redraw;
   begin
-    FillChar(DR, SizeOf(DR), 0);
-    DR.AX := 22;
-    DR.ES := SO(Buffer).S;
-    DR.DX := SO(Buffer).O;
-    if SimulateRealModeInt($33, DR) <> 0 then ;
+    EraseCursor;
+    DrawCursor;
+    FlushScreen;
   end;
 
-  procedure RestoreMouseStatePM(Buffer : Pointer);
-  var
-    DR : DPMIRegisters;
+  procedure ClampPos(var X, Y : Integer);
   begin
-    FillChar(DR, SizeOf(DR), 0);
-    DR.AX := 23;
-    DR.ES := SO(Buffer).S;
-    DR.DX := SO(Buffer).O;
-    if SimulateRealModeInt($33, DR) <> 0 then ;
+    if X >= MouseXHi then
+      X := MouseXHi-1;
+    if X < MouseXLo then
+      X := MouseXLo;
+    if Y >= MouseYHi then
+      Y := MouseYHi-1;
+    if Y < MouseYLo then
+      Y := MouseYLo;
   end;
-{$ENDIF}
+
+  procedure MoveTo(X, Y : Integer);
+    {-Move the pointer, redrawing the cursor}
+  begin
+    ClampPos(X, Y);
+    if (X <> CurX) or (Y <> CurY) then begin
+      Inc(MickX, X-CurX);
+      Inc(MickY, Y-CurY);
+      EraseCursor;
+      CurX := X;
+      CurY := Y;
+      DrawCursor;
+      FlushScreen;
+    end;
+  end;
+
+  function RelX : Byte;
+  begin
+    RelX := CurX-MouseXLo+1;
+  end;
+
+  function RelY : Byte;
+  begin
+    RelY := CurY-MouseYLo+1;
+  end;
+
+  procedure HandleEvent(var E : TMouseEvent);
+    {-Port of MouseEventHandler: update state and call the user routine}
+  var
+    NewB, Bit, Ev, Shown : Byte;
+    I, NX, NY : Integer;
+    P : EventProc;
+  begin
+    Ev := 0;
+    NX := E.x;
+    NY := E.y;
+    ClampPos(NX, NY);
+    if (NX <> CurX) or (NY <> CurY) then begin
+      Ev := MouseMoved;
+      MoveTo(NX, NY);
+    end;
+
+    NewB := E.Buttons and 7;
+    for I := 0 to 2 do begin
+      Bit := 1 shl I;
+      if ((NewB and Bit) <> 0) and ((Buttons and Bit) = 0) then begin
+        Inc(PressCnt[I]);
+        PressX[I] := RelX;
+        PressY[I] := RelY;
+        Ev := Ev or (2 shl (2*I));
+      end
+      else if ((NewB and Bit) = 0) and ((Buttons and Bit) <> 0) then begin
+        Inc(ReleaseCnt[I]);
+        ReleaseX[I] := RelX;
+        ReleaseY[I] := RelY;
+        Ev := Ev or (4 shl (2*I));
+      end;
+    end;
+    Buttons := NewB;
+
+    if (Ev <> 0) and EventHandlerInstalled then begin
+      {clear the MouseMoved bit unless this is a move-only event}
+      Shown := Ev;
+      if Shown <> MouseMoved then
+        Shown := Shown and $FE;
+      MouseEvent := Shown;
+      MouseStatus := ButtonStatus(Buttons);
+      MouseLastX := RelX;
+      MouseLastY := RelY;
+      if ((Ev and MouseRoutineEvent) <> 0) and (MouseRoutine <> nil) then begin
+        P := EventProc(MouseRoutine);
+        P;
+      end;
+    end;
+  end;
+
+  procedure PollEvents;
+    {-Drain the Mouse unit's event queue}
+  var
+    E : TMouseEvent;
+  begin
+    if not MouseInstalled or not MouseStarted or InPoll then
+      Exit;
+    InPoll := True;
+    while Mouse.PollMouseEvent(E) do begin
+      Mouse.GetMouseEvent(E);
+      HandleEvent(E);
+    end;
+    InPoll := False;
+  end;
+
+  procedure WaitTick;
+    {-Replacement for INT $28: yield while waiting for a mouse event}
+  begin
+    FlushScreen;
+    SysUtils.Sleep(1);
+    PollEvents;
+  end;
+
+  procedure ShowMouseLow;
+  begin
+    if MouseInstalled then begin
+      MouseCursorOn := True;
+      Redraw;
+    end;
+  end;
+
+  procedure HideMouseLow;
+  begin
+    if MouseInstalled then begin
+      EraseCursor;
+      MouseCursorOn := False;
+      FlushScreen;
+    end;
+  end;
+
+  procedure ResetState;
+  var
+    I : Integer;
+  begin
+    EraseCursor;
+    MouseCursorOn := False;
+    EventHandlerInstalled := False;
+    MouseRoutine := nil;
+    MouseRoutineEvent := DisableEventHandler;
+    MouseEvent := DisableEventHandler;
+    MouseStatus := NoButton;
+    for I := 0 to 2 do begin
+      PressCnt[I] := 0;
+      ReleaseCnt[I] := 0;
+      PressX[I] := 1;
+      PressY[I] := 1;
+      ReleaseX[I] := 1;
+      ReleaseY[I] := 1;
+    end;
+    Buttons := 0;
+    CursorSoft := True;
+    ScrMask := DefaultScreenMask;
+    CurMask := DefaultCursorMask;
+    HardStart := 0;
+    MickX := 0;
+    MickY := 0;
+    RatioX := 8;
+    RatioY := 16;
+    MouseXLo := 0;
+    MouseYLo := 0;
+    MouseXHi := ScreenWidth;
+    MouseYHi := ScreenHeight;
+    CurX := ScreenWidth div 2;
+    CurY := ScreenHeight div 2;
+    MouseLastX := RelX;
+    MouseLastY := RelY;
+  end;
+
+  procedure InitializeMouse;
+    {-Reinitializes mouse and sets MouseInstalled}
+  var
+    N : Word;
+  begin
+    if not MouseStarted then begin
+      MouseInstalled := False;
+      MouseButtons := 0;
+      if CrtHasConsole then begin
+        N := Mouse.DetectMouse;
+        if N > 0 then begin
+          Mouse.InitMouse;
+          MouseStarted := True;
+          MouseInstalled := True;
+          if N > 3 then
+            N := 3;
+          MouseButtons := N;
+        end;
+      end;
+    end;
+    if MouseInstalled then
+      ResetState;
+  end;
 
   function MousePressed : Boolean;
     {-Return True if a mouse button is currently being pressed}
   begin
     if not(MouseInstalled and EventHandlerInstalled) then
       MousePressed := False
-    else
+    else begin
+      PollEvents;
       MousePressed := MouseStatus <> NoButton;
+    end;
   end;
 
   function MouseKeyWord : Word;
@@ -382,14 +553,11 @@ var
       Exit;
     end;
 
-    {force interrupts on}
-    inline($FB);               {sti}
-
     {wait for a button to be pressed}
+    PollEvents;
     Status := MouseStatus;
     while Status = NoButton do begin
-      {make sure TSR's can pop up}
-      inline($cd/$28);
+      WaitTick;
       Status := MouseStatus;
     end;
 
@@ -408,15 +576,10 @@ var
           SaveBitsOn := BitsOn;
         end;
 
-        {make sure TSR's can pop up}
-        inline($cd/$28);
-
+        WaitTick;
         TempStatus := MouseStatus;
       end;
     end;
-
-    {turn interrupts off}
-    inline($FA);
 
     {return pseudo-scan code}
     MouseKeyWord := ScanTable[Status];
@@ -424,9 +587,6 @@ var
     {save current mouse coordinates}
     MouseKeyWordX := MouseLastX;
     MouseKeyWordY := MouseLastY;
-
-    {turn interrupts on}
-    inline($FB);
   end;
 
   procedure ShowMouse;
@@ -458,6 +618,197 @@ var
       ShowMouse
     else
       HideMouse;
+  end;
+
+  procedure MouseWhereXY(var MouseX, MouseY : Byte; var Status : ButtonStatus);
+    {-Return mouse position and button status}
+  begin
+    if MouseInstalled then begin
+      PollEvents;
+      Status := ButtonStatus(Buttons);
+      MouseX := RelX;
+      MouseY := RelY;
+    end;
+  end;
+
+  function MouseWhereX : Byte;
+    {-Return current X coordinate for mouse}
+  begin
+    if MouseInstalled then begin
+      PollEvents;
+      MouseLastX := RelX;
+      MouseWhereX := MouseLastX;
+    end
+    else
+      MouseWhereX := 0;
+  end;
+
+  function MouseWhereY : Byte;
+    {-Return current Y coordinate for mouse}
+  begin
+    if MouseInstalled then begin
+      PollEvents;
+      MouseLastY := RelY;
+      MouseWhereY := MouseLastY;
+    end
+    else
+      MouseWhereY := 0;
+  end;
+
+  procedure MouseGotoXY(MouseX, MouseY : Byte);
+    {-Set mouse position}
+  begin
+    if not MouseInstalled then
+      Exit;
+    PollEvents;
+    if (MouseX < 1) or (MouseY < 1) then
+      Exit;
+    {check against the current window}
+    if (Word(MouseY)+MouseYLo > MouseYHi) or (Word(MouseX)+MouseXLo > MouseXHi) then
+      Exit;
+    MoveTo(Pred(Word(MouseX)+MouseXLo), Pred(Word(MouseY)+MouseYLo));
+    MouseLastX := RelX;
+    MouseLastY := RelY;
+  end;
+
+  function ButtonIndex(Button : ButtonStatus) : Integer;
+    {-Map LeftButton/RightButton/CenterButton to 0..2, else -1}
+  begin
+    case Button of
+      LeftButton : ButtonIndex := 0;
+      RightButton : ButtonIndex := 1;
+      CenterButton : ButtonIndex := 2;
+    else
+      ButtonIndex := -1;
+    end;
+  end;
+
+  function MouseButtonPressed(Button : ButtonStatus; var Count : Word;
+                              var LastX, LastY : Byte) : Boolean;
+    {-Returns True if the Button to check has been pressed.}
+  var
+    I : Integer;
+  begin
+    Count := 0;
+    MouseButtonPressed := False;
+    if not MouseInstalled then
+      Exit;
+    PollEvents;
+    I := ButtonIndex(Button);
+    if I < 0 then
+      Exit;
+    Count := PressCnt[I];
+    LastX := PressX[I];
+    LastY := PressY[I];
+    PressCnt[I] := 0;
+    MouseButtonPressed := Count <> 0;
+  end;
+
+  function MouseButtonReleased(Button : ButtonStatus; var Count : Word;
+                               var LastX, LastY : Byte) : Boolean;
+    {-Returns True if the Button to check has been released.}
+  var
+    I : Integer;
+  begin
+    Count := 0;
+    MouseButtonReleased := False;
+    if not MouseInstalled then
+      Exit;
+    PollEvents;
+    I := ButtonIndex(Button);
+    if I < 0 then
+      Exit;
+    Count := ReleaseCnt[I];
+    LastX := ReleaseX[I];
+    LastY := ReleaseY[I];
+    ReleaseCnt[I] := 0;
+    MouseButtonReleased := Count <> 0;
+  end;
+
+  procedure MouseWindow(XLow, YLow, XHigh, YHigh : Byte);
+    {-Sets window coordinates to be observed by the mouse}
+  begin
+    if not MouseInstalled then
+      Exit;
+    {validate all parameters BEFORE setting any window coordinates}
+    if (XLow < 1) or (YLow < 1) or (XHigh < 1) or (YHigh < 1) then
+      Exit;
+    if (XLow > XHigh) or (XHigh > ScreenWidth) then
+      Exit;
+    if (YLow > YHigh) or (YHigh > ScreenHeight) then
+      Exit;
+
+    MouseXLo := XLow-1;
+    MouseYLo := YLow-1;
+    MouseXHi := XHigh;
+    MouseYHi := YHigh;
+
+    {the driver keeps the pointer inside the new window}
+    MoveTo(CurX, CurY);
+  end;
+
+  procedure SoftMouseCursor(ScreenMask, CursorMask : Word);
+    {-Set mouse to use a software cursor}
+  begin
+    if not MouseInstalled then
+      Exit;
+    CursorSoft := True;
+    ScrMask := ScreenMask;
+    CurMask := CursorMask;
+    if MouseCursorOn then
+      Redraw;
+  end;
+
+  procedure HardMouseCursor(StartLine, EndLine : Word);
+    {-Set mouse to use the hardware cursor (emulated, see unit header)}
+  begin
+    if not MouseInstalled then
+      Exit;
+    CursorSoft := False;
+    HardStart := StartLine;
+    if MouseCursorOn then
+      Redraw;
+  end;
+
+  function GetMousePage : Byte;
+    {FPC port: stubbed because there is only one text page}
+  begin
+    GetMousePage := 0;
+  end;
+
+  procedure SetMousePage(Page : Byte);
+    {FPC port: stubbed because there is only one text page}
+  begin
+  end;
+
+  procedure GetMickeyCount(var Horizontal, Vertical : Integer);
+    {-Returns the mickey count since the last call (estimated from cells)}
+  begin
+    Horizontal := 0;
+    Vertical := 0;
+    if not MouseInstalled then
+      Exit;
+    PollEvents;
+    Horizontal := MickX*RatioX;
+    Vertical := MickY*RatioY;
+    MickX := 0;
+    MickY := 0;
+  end;
+
+  procedure SetMickeyToPixelRatio(Horizontal, Vertical : Integer);
+    {FPC port: stubbed because the pointer speed is set by the OS; the ratio
+     only scales the values returned by GetMickeyCount}
+  begin
+    if MouseInstalled then begin
+      RatioX := Horizontal;
+      RatioY := Vertical;
+    end;
+  end;
+
+  procedure FullMouseWindow;
+    {-Sets mouse window coordinates to full screen}
+  begin
+    MouseWindow(1, 1, ScreenWidth, ScreenHeight);
   end;
 
   procedure NormalMouseCursor;
@@ -506,12 +857,6 @@ var
     HardMouseCursor($20, 0);
   end;
 
-  procedure FullMouseWindow;
-    {-Sets mouse window coordinates to full screen}
-  begin
-    MouseWindow(1, 1, ScreenWidth, ScreenHeight);
-  end;
-
   procedure StoreMouseCoordinates(var WC : WindowCoordinates);
     {-Store the mouse window coordinates in WC}
   begin
@@ -546,138 +891,23 @@ var
   end;
 
   function MouseStateBufferSize : Word;
-    {-Returns amount of memory needed to save the state of the mouse driver}
-  var
-    I : Word;
+    {FPC port: stubbed because there is no driver state to save}
   begin
-    if not MouseInstalled then
-      MouseStateBufferSize := 0
-    else begin
-{$IFDEF Dpmi}                        {!!.20}
-      I := GetStorageSizePM;         {!!.20}
-{$ELSE}                              {!!.20}
-      I := GetStorageSize;
-{$ENDIF}                             {!!.20}
-      if I <> 0 then
-        Inc(I, SizeOf(Word));
-      MouseStateBufferSize := I;
-    end;
+    MouseStateBufferSize := 0;
   end;
 
   procedure SaveMouseState(var MSP : MouseStatePtr; Allocate : Boolean);
-    {-!!.20 rewritten - Save the state of the mouse driver, allocating the
-      buffer if requested.}
-  var
-    I : Word;
-{$IFDEF Dpmi}
-    L : Longint;
-{$ENDIF}
+    {FPC port: stubbed because there is no driver state to save}
   begin
-{$IFDEF Dpmi}
-    {make sure a mouse is installed}
-    if not MouseInstalled then
-      Exit;
-
-    {see how much memory we need}
-    I := MouseStateBufferSize;
-
-    {exit if 0 was returned or insufficient memory exists}
-    if (I = 0) or (I > 2048) then {!!.22}
-      Exit;
-
-    {allocate state buffer if required}
-    if Allocate then begin
-      GetMem(MSP, I);
-      {MSP^.BufSize := I;}        {!!.22}
-    end;
-    MSP^.BufSize := I;            {!!.22}
-
-    {allocate real-mode memory for the state call}
-    L := GlobalDosAlloc(I);
-    if L = 0 then begin
-      if Allocate then begin
-        FreeMem(MSP, I);
-        MSP := nil;
-      end;
-      Exit;
-    end;
-
-    {get the state info}
-    SaveMouseStatePM(Ptr(HiLo(L).HiWord, 0));
-    Move(Ptr(HiLo(L).LoWord, 0)^, MSP^.Buffer, I-2);
-
-    {free the real-mode memory}
-    L := GlobalDosFree(HiLo(L).LoWord);
-
-
-{$ELSE}
-
-    if Allocate then begin
-      {assume failure}
+    if Allocate then
       MSP := nil;
-
-      {make sure a mouse is installed}
-      if not MouseInstalled then
-        Exit;
-
-      {see how much memory we need}
-      I := MouseStateBufferSize;
-
-      {exit if 0 was returned or insufficient memory exists}
-      if (I = 0) or (I > MaxAvail) then
-        Exit;
-
-      {allocate the MouseState record}
-      GetMem(MSP, I);
-
-      {fill in the MouseState record}
-      MSP^.BufSize := I;
-    end;
-
-    SaveMouseStatePrim(MSP^.Buffer);
-{$ENDIF}
   end;
 
   procedure RestoreMouseState(var MSP : MouseStatePtr; Deallocate : Boolean);
-    {-!!.20 rewritten - Restore the state of the mouse driver and Deallocate
-      the buffer if requested}
-{$IFDEF Dpmi}
-  var
-    L : LongInt;
-{$ENDIF}
+    {FPC port: stubbed because there is no driver state to restore}
   begin
-    {exit if MSP is nil}
-    if (MSP = nil) or not MouseInstalled then
-      Exit;
-
-{$IFDEF Dpmi}
-    {allocate real mode memory buffer}
-    L := GlobalDosAlloc(MSP^.BufSize);
-    if L = 0 then begin
-      if Deallocate then begin
-        FreeMem(MSP, MSP^.BufSize);
-        MSP := nil;
-      end;
-      Exit;
-    end;
-
-    {restore the mouse state}
-    Move(MSP^.Buffer, Ptr(HiLo(L).LoWord, 0)^, MSP^.BufSize-2);
-    RestoreMouseStatePM(Ptr(HiLo(L).HiWord, 0));
-
-    {free the real mode memory buffer}
-    L := GlobalDosFree(HiLo(L).LoWord);
-
-{$ELSE}
-
-    RestoreMouseStatePrim(MSP^.Buffer);
-{$ENDIF}
-
-    if Deallocate then begin
-      {deallocate the buffer}
+    if (MSP <> nil) and Deallocate then begin
       FreeMem(MSP, MSP^.BufSize);
-
-      {set MSP to nil so we won't do the same thing twice}
       MSP := nil;
     end;
   end;
@@ -685,10 +915,8 @@ var
   procedure EnableEventHandling;
     {-Enable the event handler needed for MousePressed and MouseKeyWord}
   begin
-    if MouseInstalled and not EventHandlerInstalled then begin
-      MouseEventPrim(AllMouseEvents, @MouseEventHandler);
+    if MouseInstalled and not EventHandlerInstalled then
       EventHandlerInstalled := True;
-    end;
   end;
 
   procedure SetMouseEventHandler(EventMask : MouseEventType; UserRoutine : Pointer);
@@ -716,10 +944,6 @@ var
     {-Disable the event handler installed by EnableEventHandling}
   begin
     if EventHandlerInstalled then begin
-      {disable the event handler}
-      MouseEventPrim(DisableEventHandler, nil);
-
-      {set flag to indicate that we're not installed}
       EventHandlerInstalled := False;
 
       {reset variables}
@@ -748,8 +972,7 @@ var
       else if MousePressed then
         I := MouseKeyWord
       else
-        {give TSR's a chance to pop up}
-        inline($cd/$28);
+        WaitTick;
     until I <> $FFFF;
     ReadKeyOrButton := I;
   end;
@@ -780,11 +1003,27 @@ var
     {restore previous exit handler}
     ExitProc := SaveExitProc;
 
-    {reinitialize the mouse--disables all event handlers and hides mouse}
-    InitializeMouse;
+    if MouseInstalled then begin
+      EraseCursor;
+      MouseCursorOn := False;
+      EventHandlerInstalled := False;
+      MouseRoutine := nil;
+      if MouseStarted then begin
+        Mouse.DoneMouse;
+        MouseStarted := False;
+      end;
+    end;
   end;
 
 begin
+  Drawn := False;
+  InPoll := False;
+  MouseStarted := False;
+  MouseInstalled := False;
+  MouseButtons := 0;
+  MouseCursorOn := False;
+  EventHandlerInstalled := False;
+
   {initialize the mouse if one is installed (sets MouseInstalled)}
   InitializeMouse;
 

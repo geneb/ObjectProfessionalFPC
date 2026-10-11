@@ -1417,6 +1417,7 @@
     {Following lines are more efficient than previous approach} {!!.02}
     pRow := pkRow;
     pCol := pkCol;
+    pChoice := pkChoice; {FPC port: was uninitialized in original}
     if not FlagIsSet(pkFlags, pkDrawActive) then begin
       pkDrawItem(pkChoice, pkRow, pkCol, True);
       if pkMoreRec.HdrNum <> 255 then

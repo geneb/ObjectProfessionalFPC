@@ -442,10 +442,10 @@ FailPoint:
     P := @hwNamP^[TopicOfs];
     Len := (not P^) and $7F;
     hwRealTopicName[0] := Char(Len);
-    inc(OS(P).O);
+    inc(P);
     for I := 1 to Len do begin
       hwRealTopicName[I] := Char(not P^);
-      inc(OS(P).O);
+      inc(P);
     end;
   end;
 
@@ -998,7 +998,7 @@ ExitPoint:
     {Get the information}
     if FlagIsSet(hwFlags, hwHelpInMem) then
       {Information already in memory, just return pointer}
-      Pt := Ptr(OS(hwHdrP).S, OS(hwHdrP).O+Word(SeekOfs))
+      Pt := Pointer(PtrUInt(hwHdrP)+PtrUInt(SeekOfs))  {FPC port: flat pointer}
 
     else if FlagIsSet(hwFlags, hwHelpFileOpen) then begin
       {Help file is open}
@@ -1155,7 +1155,7 @@ var
       {Buffered nibble available}
       GetNibble := NibBuf shr 4;
       Nibble := False;
-      Inc(OS(SrcP).O);
+      Inc(SrcP);
     end else begin
       {First nibble of byte}
       NibBuf := SrcP^;
@@ -1167,7 +1167,7 @@ var
   procedure AbstractHelpWindow.hwDecompress(Len : Word; SP, DP : BytePtr);
     {-Decompress the buffer at SP into the buffer at DP}
   var
-    EndOfs : Word;
+    EndPtr : BytePtr;
     N : Byte;
     T : Byte;
     Xlat : XlateArray;
@@ -1176,10 +1176,10 @@ var
     Nibble := False;
     SrcP := SP;
     DesP := DP;
-    EndOfs := OS(SrcP).O+Len;
+    EndPtr := BytePtr(PtrUInt(SrcP)+Len);
     Xlat := hwHdrP^.XlateTable;
 
-    while OS(SrcP).O < EndOfs do begin
+    while PtrUInt(SrcP) < PtrUInt(EndPtr) do begin
       N := GetNibble;
       if N < $0F then
         {15 most frequent characters mapped into 4 bits}
@@ -1190,10 +1190,10 @@ var
         T := (GetNibble shl 4) or N;
       end;
       DesP^ := T;
-      inc(OS(DesP).O);
+      inc(DesP);
     end;
 
-    hwCurLen := OS(DesP).O-OS(DP).O; {!!.13}
+    hwCurLen := PtrUInt(DesP)-PtrUInt(DP); {!!.13}
   end;
 
   function AbstractHelpWindow.TopicExists(Topic : Word) : Boolean; {!!.02}
@@ -1239,7 +1239,7 @@ var
         hwLoadTopic := epNonFatal+ecNoHelpForTopic;
         Exit;
       end;
-      SP := Ptr(OS(hwHdrP).S, OS(hwHdrP).O+Frec.Start);
+      SP := BytePtr(PtrUInt(hwHdrP)+PtrUInt(Frec.Start));  {FPC port: flat pointer}
 
     end else begin
       {Help on disk}

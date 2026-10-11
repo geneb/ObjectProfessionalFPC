@@ -1,11 +1,11 @@
 
-{$IFDEF Windows}                                                      {!!.20}
+{$IFDEF OPWinTP}                                                      {!!.20}
   !! ERROR: This unit is not compatible with Windows applications !!  {!!.20}
 {$ENDIF}                                                              {!!.20}
 
 {$S-,R-,V-,I-,B-,F+,O+,A-}
 
-{$I OPDEFINE.INC}
+{$I opdefine.inc}
 
 {*********************************************************}
 {*                   OPFORM.PAS 1.30                     *}
@@ -60,7 +60,7 @@ const
   pfRealVar           = $10000000; {field is a real variable of some sort}
   pfDeallocVarPtr     = $20000000; {object must deallocate the VarPtr}
   pfDeallocPicture    = $40000000; {object must deallocate the picture mask}
-  pfClonedField       = $80000000; {object created by clone method}  {!!.03}
+  pfClonedField       = LongInt($80000000); {object created by clone method}  {!!.03}
 
   {special Option flags used by directives}
   pfDirectiveOn       = pfDirective + pfInhibitPos + pfInhibitString +
@@ -1180,8 +1180,8 @@ const
   DefNumCopies        : Byte = 1;
   DefTabSize          : Byte = 8;
   NullPicture         : String[1] = '';
-  SingleLineBox       : BoxCharSet = ('Ú','À','¿','Ù','Ä','Ä','³','³');
-  DoubleLineBox       : BoxCharSet = ('É','È','»','¼','Í','Í','º','º');
+  SingleLineBox       : BoxCharSet = (#$DA,#$C0,#$BF,#$D9,#$C4,#$C4,#$B3,#$B3);
+  DoubleLineBox       : BoxCharSet = (#$C9,#$C8,#$BB,#$BC,#$CD,#$CD,#$BA,#$BA);
 
   DefTopMargin        : Dimension = 0.0;
   DefBottomMargin     : Dimension = 0.0;
@@ -1339,9 +1339,9 @@ procedure LJRule(P : PrinterPtr; Field : LineFieldPtr);
 
 implementation
 
-{$I OPFORM.IN1}         {implementation of PrintField and PrintPage}
-{$I OPFORM.IN2}         {implementation PrintedForm and Report}
-{$I OPFORM.IN3}         {conversion and hardware specific routines}
+{$I opform.in1}         {implementation of PrintField and PrintPage}
+{$I opform.in2}         {implementation PrintedForm and Report}
+{$I opform.in3}         {conversion and hardware specific routines}
 
 {$IFDEF InitAllUnits}
 begin

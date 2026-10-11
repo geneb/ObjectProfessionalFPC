@@ -6,12 +6,15 @@
 {*                 All rights reserved.                  *}
 {*********************************************************}
 
-{$I OPDEFINE.INC}
+{$I opdefine.inc}
 
 {.$DEFINE NoPop}            {If the following directive is defined, DESKPOP
                              will be compiled as a non-resident program. The
                              state of this define MUST agree with the
                              identically named define in DESKPOP.PAS}
+
+{FPC port: no TSR possible; always build the non-resident version}
+{$DEFINE NoPop}
 
 {***************************************************************************
  This program requires that OPDEFINE.INC activate the following defines:
@@ -152,9 +155,9 @@ const
 
   {--------- include files ---------------------}
 
-  {$I DESKMAIN.ICD}  {configuration data}
-  {$I DESKMAIN.IN1}  {generic local menu, directory, calculator}
-  {$I DESKMAIN.IN2}  {editor, phone book}
+  {$I deskmain.icd}  {configuration data}
+  {$I deskmain.in1}  {generic local menu, directory, calculator}
+  {$I deskmain.in2}  {editor, phone book}
 
   {--------- routines for calendar -----------}
 
@@ -479,7 +482,7 @@ const
       AddItem('Move',             02, 1, 02);
       AddItem('Resize',           03, 1, 03);
       AddItem('Zoom',             04, 1, 04);
-      AddSeparator('Ã', 'Ä', '´', 05);
+      AddSeparator(#$C3, #$C4, #$B4, 05);
       AddItem('Block',            06, 1, 05);
         AddFramedSubMenu(4, 9, 15, 11, Vertical, DefWindowFrame);
         AddItem('Hidden Yes',     01, 1, 06);
@@ -568,7 +571,7 @@ const
     {-Display the status line for the file browser window}
   const
     StatusMsg =
-      ' <F3> New file  <F9> Menu  <AltH> Hex/Ascii  <Esc> Close  ³ ';
+      ' <F3> New file  <F9> Menu  <AltH> Hex/Ascii  <Esc> Close  '#$B3' ';
   begin
     with BrowseWin do begin
       if brOptionsAreOn(brNewFile) then begin
@@ -830,7 +833,7 @@ Reevaluate:
       end;
 
       {add menu items}
-      AddItem(' ð ' ,         02, 0, AboutId);      {!!.03}
+      AddItem(' '#$F0' ' ,         02, 0, AboutId);      {!!.03}
       AddItem(' Files ' ,     05, 2, DirWinId);     {!!.03}
       AddItem(' Browser ',    12, 2, BrowseWinId);  {!!.03}
       AddItem(' Calculator ', 21, 2, CalcWinId);    {!!.03}
@@ -960,7 +963,7 @@ Reevaluate:
     NextWin     : Byte;            {next window to go to}
     Save8x8     : Boolean;         {using 8x8 font?}
     CursorSL    : Word;            {saved cursor scan lines}
-    EmuFlag     : Byte absolute $40:$87;
+    EmuFlag     : Byte;            {FPC port: BIOS EGA info byte (40:87) not accessible}
     SaveEmu     : Boolean;         {saved cursor emulation state}
     WP          : WindowPtr;
 

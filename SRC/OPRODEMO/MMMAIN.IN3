@@ -755,7 +755,7 @@ type
       end
       else
         GenLine(0, 'program T'+JustName(UnitName)+';'^M^J);
-      GenLine(0, '{$I OPDEFINE.INC}'^M^J);
+      GenLine(0, '{$I opdefine.inc}'^M^J);
     end;
 
     procedure MakeUsesList(ForUnit : Boolean);

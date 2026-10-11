@@ -56,4 +56,3 @@ InitScrapMacroPtr       ENDP
 CODE    ENDS
 
         END
-

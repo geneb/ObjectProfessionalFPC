@@ -509,7 +509,7 @@
     while P <> nil do begin
       {Get pointer to next node}
       N := P^.slNext;
-{$IFDEF Dpmi}                                          {!!.20}
+{$IFDEF OPFPC} {FPC port: no heap-origin test is possible; always Dispose}                                          {!!.20}
       Dispose(P, Done);                                {!!.20}
 {$ELSE}                                                {!!.20}
       if OS(P).S >= OS(HeapOrg).S then
@@ -800,7 +800,7 @@
     while N <> nil do begin
       {Get DoubleNodePtr to previous node}
       P := N^.dlPrev;
-{$IFDEF Dpmi}                                             {!!.20}
+{$IFDEF OPFPC} {FPC port: no heap-origin test is possible; always Dispose}                                             {!!.20}
       Dispose(N, Done);                                   {!!.20}
 {$ELSE}                                                   {!!.20}
       if OS(N).S >= OS(HeapOrg).S then                    {!!.03}
@@ -1205,48 +1205,18 @@
   end;
 
   function NextSetMac(BPtr : ByteArrayPtr; Element, Max : Word) : Word;
-    {-Return the next set element of B. No range checking}
-  Inline(
-    $8C/$DF/               { mov di,ds    ;save ds}
-    $59/                   { pop cx       ;cx = Max element}
-    $5A/                   { pop dx       ;dx = Current element}
-    $5E/                   { pop si}
-    $1F/                   { pop ds       ;ds:si -> BPtr}
-                           {;set up byte array offset and initial bit mask}
-    $51/                   { push cx      ;save cx}                   {!!.20}
-    { $8E/$C1/}            { mov es,cx    ;save cx}                   {!!.20}
-    $89/$D0/               { mov ax,dx}
-    $B1/$03/               { mov cl,3}
-    $D3/$E8/               { shr ax,cl    ;ax = Element shr 3}
-    $01/$C6/               { add si,ax    ;ds:si -> byte to check}
-    $B4/$01/               { mov ah,1     ;bit mask}
-    $88/$D1/               { mov cl,dl}
-    $80/$E1/$07/           { and cl,7     ;cx = Element and 7}
-    $D2/$C4/               { rol ah,cl    ;ah = initial bit mask}
-    $59/                   { pop cx       ;restore cx}                {!!.20}
-    { $8C/$C1/}            { mov cx,es    ;restore cx}                {!!.20}
-    $FC/                   { cld          ;forward}
-    $AC/                   { lodsb        ;get first byte}
-                           {testbit:}
-    $84/$E0/               { test al,ah   ;is current bit set?}
-    $75/$18/               { jnz done     ;done if so}
-    $42/                   { inc dx       ;next element}
-    $39/$CA/               { cmp dx,cx    ;anything left to check?}
-    $77/$10/               { ja nomatch   ;jump if not}
-    $D0/$C4/               { rol ah,1     ;rotate bit mask}
-    $73/$F3/               { jnc testbit  ;jump if bits left in byte}
-                           {newbyte:}
-    $AC/                   { lodsb        ;get next byte}
-    $08/$C0/               { or al,al     ;any bits set?}
-    $75/$EE/               { jnz testbit  ;jump if so}
-    $83/$C2/$08/           { add dx,8     ;skipping 8 bits}
-    $39/$CA/               { cmp dx,cx    ;anything left to check?}
-    $76/$F4/               { jbe newbyte  ;jump if so}
-                           {nomatch:}
-    $BA/$FF/$FF/           { mov dx,$FFFF ;return $FFFF for no match}
-                           {done:}
-    $89/$D0/               { mov ax,dx    ;return element number}
-    $8E/$DF);              { mov ds,di    ;restore ds}
+    {-Return the next set element of B. Portable replacement for the original inline assembly}
+  var
+    E : LongInt;
+  begin
+    NextSetMac := $FFFF;
+    for E := Element to Max do
+      if ((BPtr^[E shr 3] shr (E and 7)) and 1 = 1) then begin
+        NextSetMac := E;
+        Exit;
+      end;
+  end;
+
 
   function BitSet.NextSet(Element : LongInt) : LongInt;
     {-Return index of next element past the current one, NoMoreBits if none}
@@ -1272,48 +1242,18 @@
   end;
 
   function NextClearMac(BPtr : ByteArrayPtr; Element, Max : Word) : Word;
-    {-Return the next clear element of B}
-  Inline(
-    $8C/$DF/               { mov di,ds    ;save ds}
-    $59/                   { pop cx       ;cx = Max element}
-    $5A/                   { pop dx       ;dx = Current element}
-    $5E/                   { pop si}
-    $1F/                   { pop ds       ;ds:si -> BPtr}
-                           {;set up byte array offset and initial bit mask}
-    $51/                   { push cx}                                 {!!.20}
-    { $8E/$C1/}            { mov es,cx    ;save cx}                   {!!.20}
-    $89/$D0/               { mov ax,dx}
-    $B1/$03/               { mov cl,3}
-    $D3/$E8/               { shr ax,cl    ;ax = Element shr 3}
-    $01/$C6/               { add si,ax    ;ds:si -> byte to check}
-    $B4/$01/               { mov ah,1     ;bit mask}
-    $88/$D1/               { mov cl,dl}
-    $80/$E1/$07/           { and cl,7     ;cx = Element and 7}
-    $D2/$C4/               { rol ah,cl    ;ah = initial bit mask}
-    $59/                   { pop cx }                                  {!!.20}
-    { $8C/$C1/}            { mov cx,es    ;restore cx}                 {!!.20}
-    $FC/                   { cld          ;forward}
-    $AC/                   { lodsb        ;get first byte}
-                           {testbit:}
-    $84/$E0/               { test al,ah   ;is current bit set?}
-    $74/$18/               { jz done      ;done if not}
-    $42/                   { inc dx       ;next element}
-    $39/$CA/               { cmp dx,cx    ;anything left to check?}
-    $77/$10/               { ja nomatch   ;jump if not}
-    $D0/$C4/               { rol ah,1     ;rotate bit mask}
-    $73/$F3/               { jnc testbit  ;jump if bits left in byte}
-                           {newbyte:}
-    $AC/                   { lodsb        ;get next byte}
-    $3C/$FF/               { cmp al,$FF   ;any bits clear?}
-    $75/$EE/               { jnz testbit  ;jump if so}
-    $83/$C2/$08/           { add dx,8     ;skipping 8 bits}
-    $39/$CA/               { cmp dx,cx    ;anything left to check?}
-    $76/$F4/               { jbe newbyte  ;jump if so}
-                           {nomatch:}
-    $BA/$FF/$FF/           { mov dx,$FFFF ;return $FFFF for no match}
-                           {done:}
-    $89/$D0/               { mov ax,dx    ;return element number}
-    $8E/$DF);              { mov ds,di    ;restore ds}
+    {-Return the next clear element of B. Portable replacement for the original inline assembly}
+  var
+    E : LongInt;
+  begin
+    NextClearMac := $FFFF;
+    for E := Element to Max do
+      if ((BPtr^[E shr 3] shr (E and 7)) and 1 = 0) then begin
+        NextClearMac := E;
+        Exit;
+      end;
+  end;
+
 
   function BitSet.NextClear(Element : LongInt) : LongInt;
     {-Return index of next clear element past the current one, NoMoreBits if none}
@@ -1339,42 +1279,18 @@
   end;
 
   function PrevSetMac(BPtr : ByteArrayPtr; Element : Word) : Word;
-    {-Return the previous set element of B. No range checking}
-  Inline(
-    $8C/$DF/               { mov di,ds    ;save ds}
-    $5A/                   { pop dx       ;dx = Current element}
-    $5E/                   { pop si}
-    $1F/                   { pop ds       ;ds:si -> BPtr}
-                           {;set up byte array offset and initial bit mask}
-    $89/$D0/               { mov ax,dx}
-    $B1/$03/               { mov cl,3}
-    $D3/$E8/               { shr ax,cl    ;ax = Element shr 3}
-    $01/$C6/               { add si,ax    ;ds:si -> byte to check}
-    $B4/$01/               { mov ah,1     ;bit mask}
-    $88/$D1/               { mov cl,dl}
-    $80/$E1/$07/           { and cl,7     ;cx = Element and 7}
-    $D2/$C4/               { rol ah,cl    ;ah = initial bit mask}
-    $FD/                   { std          ;backward}
-    $AC/                   { lodsb        ;get first byte}
-                           {testbit:}
-    $84/$E0/               { test al,ah   ;is current bit set?}
-    $75/$16/               { jnz done     ;done if so}
-    $83/$EA/$01/           { sub dx,1     ;previous element     !!.11}
-    $72/$0E/               { jc nomatch   ;jump if none left    !!.11}
-    $D0/$CC/               { ror ah,1     ;rotate bit mask}
-    $73/$F3/               { jnc testbit  ;jump if bits left in byte}
-                           {newbyte:}
-    $AC/                   { lodsb        ;get next byte}
-    $08/$C0/               { or al,al     ;any bits set?}
-    $75/$EE/               { jnz testbit  ;jump if so}
-    $83/$EA/$08/           { sub dx,8     ;skipping 8 bits}
-    $73/$F6/               { jnc newbyte  ;jump if so}
-                           {nomatch:}
-    $BA/$FF/$FF/           { mov dx,$FFFF ;return $FFFF for no match}
-                           {done:}
-    $89/$D0/               { mov ax,dx    ;return element number}
-    $8E/$DF/               { mov ds,di    ;restore ds}
-    $FC);                  { cld          ;forward}
+    {-Return the previous set element of B. Portable replacement for the original inline assembly}
+  var
+    E : LongInt;
+  begin
+    PrevSetMac := $FFFF;
+    for E := Element downto 0 do
+      if ((BPtr^[E shr 3] shr (E and 7)) and 1 = 1) then begin
+        PrevSetMac := E;
+        Exit;
+      end;
+  end;
+
 
   function BitSet.PrevSet(Element : LongInt) : LongInt;
     {-Return index of previous element before the current one, NoMoreBits if none}
@@ -1395,42 +1311,18 @@
   end;
 
   function PrevClearMac(BPtr : ByteArrayPtr; Element : Word) : Word;
-    {-Return the previous clear element of B. No range checking}
-  Inline(
-    $8C/$DF/               { mov di,ds    ;save ds}
-    $5A/                   { pop dx       ;dx = Current element}
-    $5E/                   { pop si}
-    $1F/                   { pop ds       ;ds:si -> BPtr}
-                           {;set up byte array offset and initial bit mask}
-    $89/$D0/               { mov ax,dx}
-    $B1/$03/               { mov cl,3}
-    $D3/$E8/               { shr ax,cl    ;ax = Element shr 3}
-    $01/$C6/               { add si,ax    ;ds:si -> byte to check}
-    $B4/$01/               { mov ah,1     ;bit mask}
-    $88/$D1/               { mov cl,dl}
-    $80/$E1/$07/           { and cl,7     ;cx = Element and 7}
-    $D2/$C4/               { rol ah,cl    ;ah = initial bit mask}
-    $FD/                   { std          ;backward}
-    $AC/                   { lodsb        ;get first byte}
-                           {testbit:}
-    $84/$E0/               { test al,ah   ;is current bit set?}
-    $74/$16/               { jz done      ;done if not}
-    $83/$EA/$01/           { sub dx,1     ;previous element !!.11}
-    $72/$0E/               { jc nomatch   ;jump if no more  !!.11}
-    $D0/$CC/               { ror ah,1     ;rotate bit mask}
-    $73/$F3/               { jnc testbit  ;jump if bits left in byte}
-                           {newbyte:}
-    $AC/                   { lodsb        ;get next byte}
-    $3C/$FF/               { cmp al,$FF   ;any bits clear?}
-    $75/$EE/               { jnz testbit  ;jump if so}
-    $83/$EA/$08/           { sub dx,8     ;skipping 8 bits}
-    $73/$F6/               { jnc newbyte  ;jump if so}
-                           {nomatch:}
-    $BA/$FF/$FF/           { mov dx,$FFFF ;return $FFFF for no match}
-                           {done:}
-    $89/$D0/               { mov ax,dx    ;return element number}
-    $8E/$DF/               { mov ds,di    ;restore ds}
-    $FC);                  { cld          ;forward}
+    {-Return the previous clear element of B. Portable replacement for the original inline assembly}
+  var
+    E : LongInt;
+  begin
+    PrevClearMac := $FFFF;
+    for E := Element downto 0 do
+      if ((BPtr^[E shr 3] shr (E and 7)) and 1 = 0) then begin
+        PrevClearMac := E;
+        Exit;
+      end;
+  end;
+
 
   function BitSet.PrevClear(Element : LongInt) : LongInt;
     {-Return index of previous clear element before current, NoMoreBits if none}
@@ -1484,7 +1376,7 @@
     N := -1; {!!.03}
     repeat
       N := NextSet(N);
-      if N = $FFFFFFFF then begin
+      if N = NoMoreBits then begin
         BitsSet := Cnt;
         Exit;
       end else
@@ -1699,7 +1591,7 @@
         if Next <> $FFFF then begin
           inc(Next, Base);
           if Next > biMax then
-            biNext := $FFFFFFFF
+            biNext := NoMoreBits
           else
             biNext := Next;
           Exit;
@@ -1709,23 +1601,23 @@
         Element := 0;
       end;
     end;
-    biNext := $FFFFFFFF;
+    biNext := NoMoreBits;
   end;
 
   function LargeBitSet.NextSet(Element : LongInt) : LongInt;
-    {-Return index of next set element past current, $FFFFFFFF if none}
+    {-Return index of next set element past current, NoMoreBits if none}
   begin
     NextSet := biNext(Element, True);
   end;
 
   function LargeBitSet.NextClear(Element : LongInt) : LongInt;
-    {-Return index of next clear element past current, $FFFFFFFF if none}
+    {-Return index of next clear element past current, NoMoreBits if none}
   begin
     NextClear := biNext(Element, False);
   end;
 
   function LargeBitSet.biPrev(Element : LongInt; SetClear : Boolean) : LongInt;
-    {-Return index of set element prior to current, $FFFFFFFF if none}
+    {-Return index of set element prior to current, NoMoreBits if none}
   var
     Page : Integer {Word}; {!!.02}
     Size : Word;
@@ -1755,17 +1647,17 @@
         Element := (BitPageSize shl 3)-1;                           {!!.21}
       end;
     end;
-    biPrev := $FFFFFFFF;
+    biPrev := NoMoreBits;
   end;
 
   function LargeBitSet.PrevSet(Element : LongInt) : LongInt;
-    {-Return index of previous set element before current, $FFFFFFFF if none}
+    {-Return index of previous set element before current, NoMoreBits if none}
   begin
     PrevSet := biPrev(Element, True);
   end;
 
   function LargeBitSet.PrevClear(Element : LongInt) : LongInt;
-    {-Return index of previous clear element before current, $FFFFFFFF if none}
+    {-Return index of previous clear element before current, NoMoreBits if none}
   begin
     PrevClear := biPrev(Element, False);
   end;

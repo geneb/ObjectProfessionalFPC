@@ -1,4 +1,4 @@
-{$IFDEF Windows}
+{$IFDEF OPWinTP}
   !! This program is not compatible with Windows !!
 {$ENDIF}
 
@@ -15,6 +15,11 @@
                              will be compiled as a non-resident program. The
                              state of this define MUST agree with the
                              identically named define in PHMAIN.PAS}
+
+{FPC port: no TSR; always build the non-resident version}
+{$IFDEF FPC}
+  {$DEFINE NoPop}
+{$ENDIF}
 
 {$IFDEF Dpmi}     {!!.20}   {Force non-resident status if in protected mode}
   {$DEFINE NoPop}
@@ -42,7 +47,7 @@ uses
   ;
 
 {$IFDEF EnableCutPaste}
-  {$L PHTIMER.OBJ}
+  {$L phtimer.obj}
   procedure WaitInit(OneMsec, DelayCnt : Word; UserDataPtr : Pointer); external;
     {-Sets Wait values}
   procedure GetMoreBytes; external;

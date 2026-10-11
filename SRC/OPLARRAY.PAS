@@ -1,10 +1,14 @@
-{$IFDEF Windows}
+{$IFDEF OPWinTP}
   !! ERROR - This unit is not compatible with Windows !!
 {$ENDIF}
 
 {$S-,R-,V-,I-,B-,F+,O+,A-}
 
-{$I OPDEFINE.INC}
+{$I opdefine.inc}
+
+{FPC port: stubbed because EMS/XMS do not exist; Dpmi is defined here so the
+ EMS/XMS array objects are excluded (arrays use RAM or virtual/disk only)}
+{$DEFINE Dpmi}
 
 {*********************************************************}
 {*                  OPLARRAY.PAS 1.30                    *}
@@ -511,6 +515,17 @@ type
       Ofst, Segm : Word;
     end;
 
+  {FPC port: FPC has no MaxAvail/MemAvail; report a fixed generous amount (kept small enough that 9*MemAvail does not overflow)}
+  function MaxAvail : LongInt;
+  begin
+    MaxAvail := 128*1024*1024;
+  end;
+
+  function MemAvail : LongInt;
+  begin
+    MemAvail := 128*1024*1024;
+  end;
+
   procedure Reset(var F : File; RecLen : Word);    {!!.13}
   var
     SaveFMode : Word;
@@ -567,17 +582,17 @@ type
       Write(^G);
   end;
 
-  {$I OPLARRAY.IN1}     {pulls in the code for the RamArray object}
+  {$I oplarray.in1}     {pulls in the code for the RamArray object}
 
 {$IFNDEF Dpmi}                                                       {!!.20}
-  {$I OPLARRAY.IN2}     {pulls in the code for the EmsArray object}
+  {$I oplarray.in2}     {pulls in the code for the EmsArray object}
 {$ENDIF}                                                             {!!.20}
 
-  {$I OPLARRAY.IN3}     {pulls in the code for the VirtualArray object}
+  {$I oplarray.in3}     {pulls in the code for the VirtualArray object}
 
 {$IFNDEF Dpmi}                                                       {!!.20}
   {$IFDEF SupportXms}                                                {!!.03}
-  {$I OPLARRAY.IN4}     {pulls in the code for the XmsArray object}  {!!.03}
+  {$I oplarray.in4}     {pulls in the code for the XmsArray object}  {!!.03}
   {$ENDIF}                                                           {!!.03}
 {$ENDIF}                                                             {!!.20}
 

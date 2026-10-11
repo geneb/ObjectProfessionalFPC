@@ -1,10 +1,10 @@
-{$IFDEF Windows}                                                      {!!.20}
+{$IFDEF OPWinTP}                                                      {!!.20}
   !! ERROR: This unit is not compatible with Windows applications !!  {!!.20}
 {$ENDIF}                                                              {!!.20}
 
 {$S-,R-,V-,I-,B-,F+,O+,A-}
 
-{$I OPDEFINE.INC}
+{$I opdefine.inc}
 
 {*********************************************************}
 {*                   OPFEDIT.PAS 1.30                    *}
@@ -111,7 +111,8 @@ const
   NumLockBit = $20;
   InsertBit  = $80;
 var
-  KeyboardFlags : ^Word; {absolute $40 : $17;}                        {!!.20}
+  KeyboardFlags : ^Word; { FPC port: stubbed, no BIOS data area (0040:0017) }
+  DummyKbdFlags : Word;
 
   procedure ToggleInsertMode(var InsertMode : Boolean);
     {-Toggle between insert and overtype mode, keeping BIOS keyboard flag up
@@ -143,7 +144,7 @@ var
     ExchangeStructs(S1, S2, MaxWord(Length(S1), Length(S2))+1);
   end;
 
-  {$I OPFEDIT.IN1}  {simple editors}
+  {$I opfedit.in1}  {simple editors}
 
 {$IFDEF UseCalcEdit} {!!.13}
   procedure NumberEditor(
@@ -512,9 +513,9 @@ var
         if FirstTime then
           FirstTime := False
         else begin
-          ExchangeLongInts(LongInt(StPtr), LongInt(efEditSt));
+          ExchangeStructs(StPtr, efEditSt, SizeOf(Pointer));
           CC := CP.GetCommand(ChWord);
-          ExchangeLongInts(LongInt(StPtr), LongInt(efEditSt));
+          ExchangeStructs(StPtr, efEditSt, SizeOf(Pointer));
         end;
 
         {don't allow ccIncChoice, ccDecChoice, or ccToggle}
@@ -953,9 +954,9 @@ var
         if FirstTime then
           FirstTime := False
         else begin
-          ExchangeLongInts(LongInt(StPtr), LongInt(efEditSt));
+          ExchangeStructs(StPtr, efEditSt, SizeOf(Pointer));
           CC := CP.GetCommand(ChWord);
-          ExchangeLongInts(LongInt(StPtr), LongInt(efEditSt));
+          ExchangeStructs(StPtr, efEditSt, SizeOf(Pointer));
         end;
 
         {don't allow ccIncChoice, ccDecChoice, or ccToggle}
@@ -1692,9 +1693,9 @@ var
         if FirstTime then
           FirstTime := False
         else begin
-          ExchangeLongInts(LongInt(StPtr), LongInt(efEditSt));
+          ExchangeStructs(StPtr, efEditSt, SizeOf(Pointer));
           CC := CP.GetCommand(ChWord);
-          ExchangeLongInts(LongInt(StPtr), LongInt(efEditSt));
+          ExchangeStructs(StPtr, efEditSt, SizeOf(Pointer));
         end;
 
         {don't allow ccIncChoice, ccDecChoice, or ccToggle}
@@ -2069,9 +2070,9 @@ var
         if FirstTime then
           FirstTime := False
         else begin
-          ExchangeLongInts(LongInt(StPtr), LongInt(efEditSt));
+          ExchangeStructs(StPtr, efEditSt, SizeOf(Pointer));
           CC := CP.GetCommand(ChWord);
-          ExchangeLongInts(LongInt(StPtr), LongInt(efEditSt));
+          ExchangeStructs(StPtr, efEditSt, SizeOf(Pointer));
         end;
 
         if ReadOnly then begin
@@ -2171,5 +2172,6 @@ var
   end;
 
 begin
-  KeyboardFlags := Ptr(BiosDataSele, $17);                            {!!.20}
+  DummyKbdFlags := 0;
+  KeyboardFlags := @DummyKbdFlags;
 end.

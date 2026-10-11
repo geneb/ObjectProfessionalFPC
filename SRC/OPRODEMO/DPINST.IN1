@@ -5,7 +5,7 @@
 {*********************************************************}
 
 const
-  DividerChar = 'ฤ';
+  DividerChar = #$C4;
 
   BrowseCount        = 43;
   BrowseDescriptor   : array[1..BrowseCount] of Byte = (
@@ -541,8 +541,10 @@ type
     RestoreCursorState(CursorXY, CursorSL);
   end;
 
-  {$L OPQKREF.OBJ}
-  {$L OPSCAN.OBJ}
+  {FPC port: OPQKREF.OBJ/OPSCAN.OBJ replaced by the Pascal routines in OpQkRef}
+  {$IFNDEF OPFPC}
+  {$L opqkref.obj}
+  {$L opscan.obj}
 
   {$F+}
   function EscapeSequence(B : Byte) : String20Ptr; external;
@@ -550,6 +552,7 @@ type
   function GetScanCodeName(B : Byte) : String20Ptr; external;
     {-Return a pointer to a text string representing scan code B}
   {$F-}
+  {$ENDIF}
 
   procedure KeyToString(Key : Word; var S : string; SingleKey : Boolean);
     {-Returns a string (S) representing a Key}
@@ -567,7 +570,8 @@ type
       ^J   : S := '^Enter';  {^Enter}
       ^M   : S := 'Enter';   {Enter}
       ^[   : S := 'Esc';     {Escape}
-      ^A..^_ :               {Control characters}
+      {FPC port: ranges split so they do not overlap the labels above}
+      ^A..^G, ^K..^L, ^N..^Z, #28..#31 : {Control characters}
         S := '^'+Char(KL+64);
       ' '  : S := 'Space';   {Space}
       #127 : S := '^BkSp';   {ASCII DEL}
@@ -1026,7 +1030,7 @@ const
       {$IFDEF UseScrollBars}
       {add horizontal scroll bar}
       wFrame.AddCustomScrollBar(
-        frRR, 1, MaxLongInt, 1, 1, 'ฒ', 'ฐ', dpiColors);
+        frRR, 1, MaxLongInt, 1, 1, #$B2, #$B0, dpiColors);
       {$ENDIF}
 
       HC := Hi(HK) and $0F;
@@ -1059,7 +1063,7 @@ const
       {$IFDEF UseScrollBars}
       {add horizontal scroll bar}
       wFrame.AddCustomScrollBar(
-        frRR, 1, MaxLongInt, 1, 1, 'ฒ', 'ฐ', dpiColors);
+        frRR, 1, MaxLongInt, 1, 1, #$B2, #$B0, dpiColors);
       {$ENDIF}
 
       LC := Lo(HK);
@@ -1149,7 +1153,8 @@ const
   ComStr : string[9] = ' Command ';
   LitStr : string[9] = ' Literal ';
 var
-  KbdFlags : Word absolute $40 : $17;
+  {FPC port: BIOS keyboard flags (40:17) not accessible; flags always clear}
+  KbdFlags : Word;
   KeyEditCommands : CommandProcessor;
 
   function ScrollLock : Boolean;
@@ -1447,13 +1452,13 @@ var
       Exit;
 
     {write title}
-    WriteLn(F, 'ออ', PadCh(' '+Title+ ' ', 'อ', 71));
+    WriteLn(F, #$CD#$CD, PadCh(' '+Title+ ' ', #$CD, 71));
     WriteLn(F);
 
     for I := 1 to DescCount do begin
       Cmd := Desc[I];
       if Cmd = 0 then
-        WriteLn(F, CharStr('ฤ', 73))
+        WriteLn(F, CharStr(#$C4, 73))
       else begin
         S := ANF(Cmd, UnitCode);
         if S = '' then

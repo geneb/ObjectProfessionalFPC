@@ -1,7 +1,7 @@
-{$I OPDEFINE.INC}    {!!.14}
+{$I opdefine.inc}    {!!.14}
 program OpArrayExample;  {EXLARRAY.PAS}
 uses
-  OpRoot, OpLarray;
+  OpInline, OpRoot, OpLarray;
 type
   Str19 = String[19]; {!!.15} {Change to 20 byte element so XMS gets a chance}
   Str19Array =
@@ -13,6 +13,10 @@ type
 constructor Str19Array.Init(Rows : Word; FileName : String;
                             HeapToUse : LongInt);
 const
+  {FPC port: OpLArray has no EMS/XMS arrays}
+  {$IFDEF OPFPC}
+  Priority  : AutoPriority = (lRamArray,lVirtualArray);
+  {$ELSE}
   {$IFDEF Dpmi}                                                    {!!.20}
   Priority  : AutoPriority = (lRamArray,lVirtualArray);            {!!.20}
   {$ELSE}                                                          {!!.20}
@@ -23,6 +27,7 @@ const
   Priority : AutoPriority = (lRamArray, lEmsArray, lVirtualArray);
   {$ENDIF}                                                         {!!.14}
   {$ENDIF}                                                         {!!.20}
+  {$ENDIF}
 var
   ClearEl : Str19;
 begin
@@ -72,4 +77,3 @@ begin
   {Dispose of the array}
   OA.Done;
 end.
-

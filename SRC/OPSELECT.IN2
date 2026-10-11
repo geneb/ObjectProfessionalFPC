@@ -158,12 +158,10 @@
       DisposeString(sfFieldName)
     else if I = Length(S) then
       sfFieldName^ := S
-    else if (I > Length(S)) or (MaxAvail > Length(S)) then begin
+    else begin {FPC port: MaxAvail does not exist; allocation assumed to succeed}
       DisposeString(sfFieldName);
       sfFieldName := StringToHeap(S);
-    end
-    else
-      sfSetFieldName := False;
+    end;
   end;
 
 {$IFDEF UseStreams}
@@ -506,8 +504,8 @@
       ChangeAttribute(Succ(XH-XL), YH+1, XL+1, SA);
       *)
       for R := YL+1 to YH do
-        FastFill(1, 'Û', R, XH+1, SA);
-      FastFill(Succ(XH-XL), 'ß', YH+1, XL+1, SA);
+        FastFill(1, #$DB, R, XH+1, SA);
+      FastFill(Succ(XH-XL), #$DF, YH+1, XL+1, SA);
     end;
 
     {$IFDEF UseMouse}

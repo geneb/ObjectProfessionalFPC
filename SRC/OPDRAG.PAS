@@ -1,4 +1,4 @@
-{$IFDEF Windows}
+{$IFDEF OPWinTP}
   !! ERROR - This unit is not compatible with Windows !!
 {$ENDIF}
 
@@ -9,7 +9,7 @@
 {$ENDIF}                                    {!!.20}
 
 {Conditional defines that may affect this unit}
-{$I OPDEFINE.INC}
+{$I opdefine.inc}
 
 {*********************************************************}
 {*                   OPDRAG.PAS 1.30                     *}
@@ -149,14 +149,66 @@ type
   EventQueueArray = array[0..EventQueueMax] of MouseEventRec;
 var
   SaveExit : Pointer;
-  SaveInt1C : Pointer;
   TickCounter : Word;
   DelayCounter : Word;                                              {!!.11}
+  LastBiosTick : LongInt;
+  TickBaseValid : Boolean;
   MouseEvents : EventQueueArray;
   QueueTail : Word;
   QueueHead : Word;
   ChainedEventHandler : procedure;
   ChainedEventMask : MouseEventType;
+
+  procedure MouseTimerTick;
+    {-Handle one timer tick as it applies to mouse events}
+  begin
+    if MouseStatus = LeftButton then begin
+      {Left button is down}
+      Inc(TickCounter);
+      Inc(DelayCounter);                                              {!!.11}
+      if (DelayCounter > AutoDelayTicks) and                          {!!.11}
+         (TickCounter > AutoRepeatTicks) then begin
+        StoreMouseEvent(MouseLftAuto, MouseLastX, MouseLastY);
+        TickCounter := 0;
+      end;
+    end;
+  end;
+
+  { FPC port: the INT 1Ch timer hook is replaced by polling. The clock is
+    sampled whenever the event queue is examined and the elapsed 18.2 Hz
+    ticks are fed to MouseTimerTick. }
+  procedure PollTimerTicks;
+  const
+    TicksPerDay = 1572480;
+  var
+    H, M, S, S100 : Word;
+    Now, N : LongInt;
+  begin
+    if not TickBaseValid then Exit;
+    GetTime(H, M, S, S100);
+    Now := ((LongInt(H)*3600+M*60+S)*100+S100)*182 div 1000;
+    N := Now-LastBiosTick;
+    if N < 0 then
+      N := N+TicksPerDay;
+    if N > 0 then begin
+      LastBiosTick := Now;
+      if N > 20 then
+        N := 20;
+      while N > 0 do begin
+        MouseTimerTick;
+        Dec(N);
+      end;
+    end;
+  end;
+
+  procedure StartTickPolling;
+  var
+    H, M, S, S100 : Word;
+  begin
+    GetTime(H, M, S, S100);
+    LastBiosTick := ((LongInt(H)*3600+M*60+S)*100+S100)*182 div 1000;
+    TickBaseValid := True;
+  end;
 
   procedure ClearMouseEvents;
     {-Clear the mouse event queue}
@@ -168,6 +220,7 @@ var
   function MouseEventsPending : Boolean;
     {-Return True if mouse events are available to read}
   begin
+    PollTimerTicks;
     MouseEventsPending := (QueueTail <> QueueHead);
   end;
 
@@ -273,30 +326,11 @@ var
         ChainedEventHandler;
   end;
 
-  procedure MouseInt1C; interrupt;
-    {-Handle timer ticks as they apply to mouse events}
-  begin
-    {Call old int 1C ISR}
-    inline($9C/$FF/$1E/>SaveInt1C); {PUSHF; CALL FAR [>SaveInt1C]}
-
-    if MouseStatus = LeftButton then begin
-      {Left button is down}
-      Inc(TickCounter);
-      Inc(DelayCounter);                                              {!!.11}
-      if (DelayCounter > AutoDelayTicks) and                          {!!.11}
-         (TickCounter > AutoRepeatTicks) then begin
-        StoreMouseEvent(MouseLftAuto, MouseLastX, MouseLastY);
-        TickCounter := 0;
-      end;
-    end;
-  end;
-
   procedure InstallISRs;
     {-Install mouse event handler and Int1C Handler}
   begin
     if not ISRsInstalled then begin
-      GetIntVec($1C, SaveInt1C);
-      SetIntVec($1C, @MouseInt1C);
+      StartTickPolling;  { FPC port: INT 1Ch hook replaced by polling }
       SetMouseEventHandler(AllMouseEvents, @MouseHandler);
       ISRsInstalled := True;
     end;
@@ -306,7 +340,7 @@ var
     {-Restore Int1C and disable mouse event handling}
   begin
     if ISRsInstalled then begin
-      SetIntVec($1C, SaveInt1C);
+      TickBaseValid := False;
       DisableEventHandling;
       ISRsInstalled := False;
     end;
@@ -475,7 +509,6 @@ var
         cpGetKey := CommandProcessor.cpGetKey;
         Exit;
       end;
-      inline($CD/$28); {!!.30}
     until False;
   end;
 

@@ -73,18 +73,17 @@
 
   function LengthAsciiz(var Asciiz) : Word;
     {-Return the length of an Asciiz string}
-    inline(
-      $5F/                     {pop  di       ;get pointer to ASCIIZ}
-      $07/                     {pop  es       ; into es:di}
-      $89/$FB/                 {mov  bx,di    ;store initial offset}
-      $B9/$FF/$FF/             {mov  cx,$FFFF ;check maximum length}
-      $B0/$00/                 {mov  al,0     ;look for null}
-      $FC/                     {cld           ;forward direction}
-      $F2/                     {repne}
-      $AE/                     {scasb         ;scan while equal}
-      $29/$DF/                 {sub  di,bx    ;get the number of bytes scanned}
-      $89/$F8/                 {mov  ax,di    ;return in ax}
-      $48);                    {dec  ax       ;null doesn't count}
+  type
+    ByteArr = array[0..65520] of Byte;
+  var
+    N : Word;
+  begin
+    {FPC port: former inline scasb macro}
+    N := 0;
+    while (N < $FFFF) and (ByteArr(Asciiz)[N] <> 0) do
+      Inc(N);
+    LengthAsciiz := N;
+  end;
 
   function Browser.CurrentFileName : String;
     {-Return the name of the current browse file}
@@ -316,7 +315,7 @@
     brWorking(True);
 
     {Search for string, starting on next line}
-    brFndPos := $FFFFFFFF;
+    brFndPos := -1;
     SaveLine := brCurLine;
     SaveCurPos := brCurPos;
 
@@ -494,7 +493,7 @@ Recheck2:
       end;
 
 ExitPoint:
-    if brFndPos = $FFFFFFFF then begin
+    if brFndPos = -1 then begin
       brCurLine := SaveLine;
       brCurPos := SaveCurPos;
       UpdateContents;
@@ -631,17 +630,18 @@ ExitPoint:
 
   procedure Browser.GotoOffset(Offset : LongInt);
     {-Scroll display to the line nearest Offset}
-  label
-    ExitPoint;
   var
-    SaveErrorDest : JumpRecord;
+    Dummy : Byte;
   begin
-    {set up error handler}
-    SaveErrorDest := brErrorDest;
-    if SetJump(brErrorDest) <> 0 then
-      {control returns here if error occurs}
-      goto ExitPoint;
+    {run with error handler set up; errors just fall through to the cleanup}
+    if brRunGuarded(brGuardGotoOffset, Offset, 0, Dummy, 0) <> 0 then ;
+    brWorkingFlag := 0;
+    brShowStatus;
+  end;
 
+  procedure Browser.brGotoOffsetPrim(Offset : LongInt);
+    {-Scroll display to the line nearest Offset (guarded by GotoOffset)}
+  begin
     brCurWorkingSet;
     if Offset > brLastPos then
       Offset := brLastPos
@@ -669,30 +669,15 @@ ExitPoint:
     end;
 
     brCurWorkingSet;
-
-ExitPoint:
-    brErrorDest := SaveErrorDest;
-    brWorkingFlag := 0;
-    brShowStatus;
   end;
 
   procedure Browser.GotoLine(LineNum : LongInt); {!!.03}
     {-Scroll display to the specified line}
-  label
-    ExitPoint;
   var
-    SaveErrorDest : JumpRecord;
+    Dummy : Byte;
   begin
-    {set up error handler}
-    SaveErrorDest := brErrorDest;
-    if SetJump(brErrorDest) <> 0 then
-      {control returns here if error occurs}
-      goto ExitPoint;
-
-    brGotoLinePrim(LineNum);
-
-ExitPoint:
-    brErrorDest := SaveErrorDest;
+    {run with error handler set up; errors just fall through to the cleanup}
+    if brRunGuarded(brGuardGotoLine, LineNum, 0, Dummy, 0) <> 0 then ;
     brWorkingFlag := 0;
     brShowStatus;
   end;
@@ -700,23 +685,10 @@ ExitPoint:
   procedure Browser.Transfer(StartPos, StopPos : LongInt;
                              var Buffer; BufSize : Word);
     {-Copy browse characters into Buffer}
-  label
-    ExitPoint;
-  var
-    SaveErrorDest : JumpRecord;
   begin
-    {Set up error handler}
-    SaveErrorDest := brErrorDest;
-    if SetJump(brErrorDest) <> 0 then
-      {control returns here if error occurs while browsing}
-      goto ExitPoint;
-
-    brWorking(True);
-
-    brTransferPrim(StartPos, StopPos, Buffer, BufSize);
-
-ExitPoint:
+    {Run with error handler set up}
+    brWorking(True);   {FPC port: moved ahead of the handler; it only draws}
+    if brRunGuarded(brGuardTransfer, StartPos, StopPos, Buffer, BufSize) <> 0 then ;
     brWorkingFlag := 0;
     brShowStatus;
-    brErrorDest := SaveErrorDest;
   end;

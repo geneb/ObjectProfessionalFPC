@@ -1,7 +1,7 @@
 {$S-,R-,V-,I-,B-,F+,O-,A-}
 
 {Conditional defines that may affect this unit}
-{$I OPDEFINE.INC}
+{$I opdefine.inc}
 
 {*********************************************************}
 {*                  OPCONST.PAS 1.30                     *}
@@ -332,7 +332,7 @@ const
   emComLit : array[Boolean] of string[9] = (' Command ', ' Literal ');
 const
   emMacedInstructions : string[71] =
-    ' '^[^X^Y^Z' to move, '^Q'Ù to accept, <Esc> to cancel, <ScrollLock> for literal ';
+    ' '^[^X^Y^Z' to move, '^Q#$D9' to accept, <Esc> to cancel, <ScrollLock> for literal ';
 const
   emNoPickItems : string[16] = 'No items to pick';
 const

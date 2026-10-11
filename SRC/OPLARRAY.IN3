@@ -42,23 +42,9 @@ type
 
   function Flush(var F : file) : Boolean;
     {-Flush DOS file buffers}
-  var
-    handle : Word absolute F;
-    regs : registers;
+    {FPC port: stubbed because untyped files are unbuffered in FPC and there is
+     no portable handle-duplication flush; always reports success}
   begin
-    Flush := False;
-    with regs do begin
-      ah := $45;
-      bx := handle;
-      msdos(regs);
-      if Odd(flags) then
-        Exit;
-      bx := ax;
-      ah := $3E;
-      msdos(regs);
-      if Odd(Flags) then
-        Exit;
-    end;
     Flush := True;
   end;
 
@@ -248,37 +234,20 @@ type
     GetPage := PIR;
   end;
 
-function VArrayAddress(H : VArrayHeader; R, C : Word) : LongInt;
+function VArrayAddress(const H : VArrayHeader; R, C : Word) : LongInt;
   {-Return the page parameters for a given row and column}
-Inline(
-  $5B/                   {  pop bx                    ;save column in bx}
-  $58/                   {  pop ax                    ;save row in ax}
-  $5F/                   {  pop di                    ;offset of array header}
-  $07/                   {  pop es                    ;segment of array header}
-  $31/$D2/               {  xor dx,dx                 ;prepare to divide}
-  $26/                   {  es:}
-  $F7/$75/<vRPPOFS/      {  div word ptr [di+<vRPPOfs] ;divide by RowsInPage (POR in DX, PR in AX)}
-  $89/$D1/               {  mov cx,dx                 ;save POR in cx}
-  $89/$C6/               {  mov si,ax                 ;save PR in si}
-  $89/$D8/               {  mov ax,bx                 ;col into ax}
-  $31/$D2/               {  xor dx,dx                 ;prepare to divide}
-  $26/                   {  es:}
-  $F7/$75/<vCPPOFS/      {  div word ptr [di+<vCPPOfs] ;divide by ColsInPage (POC in DX, PC in AX)}
-  $89/$C3/               {  mov bx,ax                 ;save PC in BX}
-  $26/                   {  es:}
-  $8B/$45/<vPDOFS/       {  mov ax,[di+<vPDOfs]        ;get PagesDown in AX}
-  $52/                   {  push dx                   ;save POC a moment}
-  $F7/$E3/               {  mul bx                    ;PagesDown*PC}
-  $01/$F0/               {  add ax,si                 ;Pnum = PR+PagesDown*PC}
-  $89/$C6/               {  mov si,ax                 ;Store Pnum in SI}
-  $58/                   {  pop ax                    ;get POC back}
-  $26/                   {  es:}
-  $F7/$65/<vRPPOFS/      {  mul word ptr [di+<vRPPOfs] ;RowsPerPage*POC}
-  $01/$C8/               {  add ax,cx                 ;POR+RowsPerPage*PO}
-  $26/                   {  es:}
-  $F7/$65/<vESOFS/       {  mul word ptr [di+<vESOfs]  ;ElSize*(POR+RowsPerPage*POC)}
-                         {                            ;POfs in AX}
-  $89/$F2);              {  mov dx,si                 ;PNum in DX}
+var
+  A : ArrayLI;
+  PR, POR, PC, POC : Word;
+begin
+  PR := R div H.RowsInPage;
+  POR := R mod H.RowsInPage;
+  PC := C div H.ColsInPage;
+  POC := C mod H.ColsInPage;
+  A.PNum := Word(PR + Word(H.PagesDown * PC));
+  A.POfs := Word(H.ElSize * Word(POR + Word(H.RowsInPage * POC)));
+  VArrayAddress := LongInt(A);
+end;
 
 
   function ChangesWereWritten(A : VirtualArrayPtr) : Boolean;

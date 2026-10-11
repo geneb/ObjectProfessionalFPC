@@ -121,9 +121,12 @@ begin
   WriteLn('Attempt to allocate ', Largest*16,' byte UMB: ', XmsErrorString(Err));
   if Err <> 0 then
     Exit;
-  P := Ptr(SegBase, 0);
-  P^ := XmsStr;
-  WriteLn(P^);
+  P := nil;
+  {FPC port: a real-mode UMB segment cannot be addressed; the move/read test is skipped}
+  if P <> nil then begin
+    P^ := XmsStr;
+    WriteLn(P^);
+  end;
   Err := FreeUpperMemBlock(SegBase);
   WriteLn('FreeUpperMemBlock returned: ', XmsErrorString(Err));
 end;
@@ -154,4 +157,3 @@ begin
   Pause;
   UMBTest;
 end.
-

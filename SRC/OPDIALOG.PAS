@@ -1,10 +1,10 @@
-{$IFDEF Windows}                                                      {!!.20}
+{$IFDEF OPWinTP}                                                      {!!.20}
   !! ERROR: This unit is not compatible with Windows applications !!  {!!.20}
 {$ENDIF}                                                              {!!.20}
 
 {$S-,R-,V-,I-,B-,F+,O+,A-}
 
-{$I OPDEFINE.INC}
+{$I opdefine.inc}
 
 {*********************************************************}
 {*                  OPDIALOG.PAS 1.30                    *}
@@ -39,7 +39,7 @@ uses
   OpSelect,
   OpCtrl;
 
-  {$I OPDIALOG.ICD}  {configuration data}
+  {$I opdialog.icd}  {configuration data}
 
 {.F-}
 const
@@ -340,7 +340,7 @@ procedure SimpleEditControlStream(SPtr : IdStreamPtr);
 
 implementation
 
-  {$I OPDIALOG.IN1}
+  {$I opdialog.in1}
 
   constructor DialogBox.Init(X1, Y1, X2, Y2 : Byte);
     {-Initialize the dialog box}

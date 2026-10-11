@@ -1,4 +1,4 @@
-{$IFDEF Windows}                {!!.20}
+{$IFDEF OPWinTP}                {!!.20}
   {$S-,R-,V-,I-,B-,F-,A-}       {!!.20}
   {$DEFINE PMode}               {!!.20}
 {$ELSE}                         {!!.20}
@@ -9,7 +9,7 @@
 {$ENDIF}                        {!!.20}
 
 {Conditional defines that may affect this unit}
-{$I OPDEFINE.INC}
+{$I opdefine.inc}
 
 {*********************************************************}
 {*                  OPSTRING.PAS 1.30                    *}
@@ -22,7 +22,7 @@ unit OPString;
 
 interface
 
-{$IFDEF Windows}         {!!.20 begin}
+{$IFDEF OPWinTP}         {!!.20 begin}
 uses
   WinProcs,
   WsDpmi,
@@ -49,6 +49,7 @@ type
   CharSet = set of Char;
   CompareType = (Less, Equal, Greater);
   BTable = array[0..255] of Byte; {For Boyer-Moore searching}
+  {FPC port: Real is a Double in Free Pascal (not the 6-byte TP Real)}
   {$IFOPT N+}
    Float = Extended;
   {$ELSE}
@@ -60,18 +61,18 @@ type                            {!!.20 begin}
   CaseTable = Array[128..165] of Char;
 const
   DefUCTable : CaseTable = (
-      '€', 'š', 'E', 'A', 'Ž', 'A', '', '€', 'E', 'E',
-      'E', 'I', 'I', 'I', 'Ž', '', '', '’', '’', 'O',
-      '™', 'O', 'U', 'U', 'Y', '™', 'š', '›', 'œ', '',
-      'ž', 'Ÿ', 'A', 'I', 'O', 'U', '¥', '¥'
+      #$80, #$9A, 'E', 'A', #$8E, 'A', #$8F, #$80, 'E', 'E',
+      'E', 'I', 'I', 'I', #$8E, #$8F, #$90, #$92, #$92, 'O',
+      #$99, 'O', 'U', 'U', 'Y', #$99, #$9A, #$9B, #$9C, #$9D,
+      #$9E, #$9F, 'A', 'I', 'O', 'U', #$A5, #$A5
     );
 
 const
   LCTable : CaseTable = (
-      '‡', '', '‚', 'ƒ', '„', '…', '†', '‡', 'ˆ', '‰',
-      'Š', '‹', 'Œ', '', '„', '†', '‚', '‘', '‘', '“',
-      '”', '•', '–', '—', '˜', '”', '', '›', 'œ', '',
-      'ž', 'Ÿ', ' ', '¡', '¢', '£', '¤', '¤'
+      #$87, #$81, #$82, #$83, #$84, #$85, #$86, #$87, #$88, #$89,
+      #$8A, #$8B, #$8C, #$8D, #$84, #$86, #$82, #$91, #$91, #$93,
+      #$94, #$95, #$96, #$97, #$98, #$94, #$81, #$9B, #$9C, #$9D,
+      #$9E, #$9F, #$A0, #$A1, #$A2, #$A3, #$A4, #$A4
     );
 var
   UCTable : CaseTable;
@@ -147,31 +148,19 @@ function LongIntForm(Mask : string; L : LongInt) : string;
 
 function UpCaseMac(Ch : Char) : Char;
   {-Uppercase character macro, no international character support}
-  inline(
-    $58/                     {POP  AX}
-    $3C/$61/                 {CMP    AL,'a'}
-    $72/$06/                 {JB     No}
-    $3C/$7A/                 {CMP    AL,'z'}
-    $77/$02/                 {JA     No}
-    $24/$DF);                {AND    AL,$DF}
-                             {No:}
+  {FPC port: former inline macro, now an ordinary function}
 
 function LoCaseMac(Ch : Char) : Char;
   {-Lowercase character macro, no international character support}
-  inline(
-    $58/                     {POP  AX}
-    $3C/$41/                 {CMP    AL,'A'}
-    $72/$06/                 {JB     No}
-    $3C/$5A/                 {CMP    AL,'Z'}
-    $77/$02/                 {JA     No}
-    $0C/$20);                {OR     AL,$20}
-                             {No:}
+  {FPC port: former inline macro, now an ordinary function}
 
 function Upcase(Ch : Char) : Char;
   {-Return uppercase of char, with international character support}
 
 procedure SetInternationalUpcase; {!!.02}
   {-Activate DOS international uppercase function for current code page}
+  {FPC port: there is no DOS country-info upcase routine; this simply
+   selects the built-in CP437 table (same as SetDefaultUpcase)}
 
 procedure SetDefaultUpcase; {!!.02}
   {-Activate default uppercase function}
@@ -362,12 +351,8 @@ function CleanPathName(PathName : string) : string;
 function FullPathName(FName : string) : string;
   {-Given FName (known to exist), return a full pathname}
 
-  {the following procedures are for internal use only}
-
-{.Z+}
-procedure UpCasePrim;
-procedure LoCasePrim;
-{.Z-}
+  {FPC port: UpCasePrim/LoCasePrim (register-calling-convention helpers for
+   the assembler modules) were removed; use Upcase/LoCase instead.}
 
   {==========================================================================}
 
@@ -385,15 +370,102 @@ type
 const
   Digits : array[0..$F] of Char = '0123456789ABCDEF';
 const
-  DosDelimSet : set of Char = ['\', ':', #0];
+  {FPC port: '/' accepted as a delimiter too; on Unix only '/' is a delimiter}
+{$IFDEF UNIX}
+  DosDelimSet : set of Char = ['/', #0];
+  DirSepChar = '/';
+{$ELSE}
+  DosDelimSet : set of Char = ['\', '/', ':', #0];
+  DirSepChar = '\';
+{$ENDIF}
 {const}                         {!!.21}
   {AssumeDP : Boolean = False;} {!!.21}
 
-  {$L OPCASE.OBJ}
-  {$L OPCOMP.OBJ}
-  {$L OPSEARCH.OBJ}
-  {$L OPTAB.OBJ}
-  {$L OPBM.OBJ}
+  {FPC port: the OPCASE/OPCOMP/OPSEARCH/OPTAB/OPBM assembler modules were
+   ported to Pascal and live in this unit}
+
+  function UpCaseMac(Ch : Char) : Char;
+  begin
+    if (Ch >= 'a') and (Ch <= 'z') then
+      UpCaseMac := Chr(Ord(Ch) and $DF)
+    else
+      UpCaseMac := Ch;
+  end;
+
+  function LoCaseMac(Ch : Char) : Char;
+  begin
+    if (Ch >= 'A') and (Ch <= 'Z') then
+      LoCaseMac := Chr(Ord(Ch) or $20)
+    else
+      LoCaseMac := Ch;
+  end;
+
+  function UpcaseTbl(Ch : Char) : Char;
+    {-Port of UpcasePrim}
+  begin
+    if Ch < #128 then begin
+      if (Ch >= 'a') and (Ch <= 'z') then
+        UpcaseTbl := Chr(Ord(Ch)-32)
+      else
+        UpcaseTbl := Ch;
+    end else if Ch <= #165 then
+      UpcaseTbl := UCTable[Ord(Ch)]
+    else
+      UpcaseTbl := Ch;
+  end;
+
+  function LocaseTbl(Ch : Char) : Char;
+    {-Port of LoCasePrim}
+  begin
+    if Ch < #128 then begin
+      if (Ch >= 'A') and (Ch <= 'Z') then
+        LocaseTbl := Chr(Ord(Ch)+32)
+      else
+        LocaseTbl := Ch;
+    end else if Ch <= #165 then
+      LocaseTbl := LCTable[Ord(Ch)]
+    else
+      LocaseTbl := Ch;
+  end;
+
+  function Upcase(Ch : Char) : Char;
+    {-Return uppercase of char, with international character support}
+  begin
+    Upcase := UpcaseTbl(Ch);
+  end;
+
+  function LoCase(Ch : Char) : Char;
+    {-Return lowercase of char, with international character support}
+  begin
+    LoCase := LocaseTbl(Ch);
+  end;
+
+  function StUpcase(S : string) : string;
+    {-Convert lower case letters in string to uppercase, with intl chars}
+  var
+    I : Word;
+  begin
+    for I := 1 to Length(S) do
+      S[I] := UpcaseTbl(S[I]);
+    StUpcase := S;
+  end;
+
+  function StLocase(S : string) : string;
+    {-Convert upper case letters in string to lowercase, with intl chars}
+  var
+    I : Word;
+  begin
+    for I := 1 to Length(S) do
+      S[I] := LocaseTbl(S[I]);
+    StLocase := S;
+  end;
+
+  procedure MoveFast(var Src, Dest; Count : Word);
+    {-Move Count bytes from Src to Dest (Move handles overlap)}
+  begin
+    if Count <> 0 then
+      Move(Src, Dest, Count);
+  end;
 
   function HexB(B : Byte) : string;
     {-Return hex string for byte}
@@ -423,8 +495,12 @@ const
   function HexPtr(P : Pointer) : string;
     {-Return hex string for pointer}
   begin
-    {HexPtr := HexW(Seg(P^))+':'+HexW(Ofs(P^));}   {!!.20}
-    HexPtr := HexW(OS(P).S)+':'+HexW(OS(P).O);     {!!.20}
+    {FPC port: flat pointers; show the high and low halves of the address}
+    if SizeOf(Pointer) > 4 then
+      HexPtr := HexL(LongInt(Cardinal(PtrUInt(P) shr 32)))+':'+
+                HexL(LongInt(Cardinal(PtrUInt(P) and $FFFFFFFF)))
+    else
+      HexPtr := HexW(Word(PtrUInt(P) shr 16))+':'+HexW(Word(PtrUInt(P) and $FFFF));
   end;
 
   function BinaryB(B : Byte) : string;
@@ -458,11 +534,13 @@ const
   var
     I : LongInt;
     N : Byte;
+    U : Cardinal;
   begin
     N := 1;
+    U := Cardinal(L);
     BinaryL[0] := #32;
     for I := 31 downto 0 do begin
-      BinaryL[N] := Digits[Ord(L and LongInt(1 shl I) <> 0)]; {0 or 1}
+      BinaryL[N] := Digits[Ord((U shr I) and 1)]; {0 or 1}
       Inc(N);
     end;
   end;
@@ -495,11 +573,13 @@ const
     {-Return octal string for word}
   var
     I : Word;
+    U : Cardinal;
   begin
+    U := Cardinal(L);
     OctalL[0] := #12;
     for I := 0 to 11 do begin
-      OctalL[12-I] := Digits[L and 7];
-      L := L shr 3;
+      OctalL[12-I] := Digits[U and 7];
+      U := U shr 3;
     end;
   end;
 
@@ -622,7 +702,7 @@ const
   {$IFOPT N+}          {!!.22}
     MaxPlaces = 18;    {!!.22}
   {$ELSE}              {!!.22}
-    MaxPlaces = 11;    {!!.22}
+    MaxPlaces = 255;   {FPC port: Str honors any number of decimal places, so no zero fill is needed}
   {$ENDIF}             {!!.22}
     FormChars : string[8] = '#@*$-+,.';
     PlusArray : array[Boolean] of Char = ('+', '-');
@@ -834,15 +914,8 @@ Done:
     Form := FormPrim(Mask, R, False);
   end;
 
-  {In OPCASE.OBJ}
-  procedure SetInternationalUpcasePrim; external; {!!.02}
-  procedure UpcasePrim; external;
-  procedure LocasePrim; external;
-  function Upcase(Ch : Char) : Char; external;
-  function LoCase(Ch : Char) : Char; external;
-  function StUpcase(S : string) : string; external;
-  function StLocase(S : string) : string; external;
-  procedure MoveFast(var Src, Dest; Count : Word); external;
+  {FPC port: Upcase/LoCase/StUpcase/StLocase/MoveFast are defined near the
+   top of this implementation section}
 
   function CharStr(Ch : Char; Len : Byte) : string;
     {-Return a string of length len filled with ch}
@@ -1254,28 +1327,365 @@ Done:
     end;
   end;
 
-  {In OPTAB.OBJ}
-  function Entab(S : string; TabSize : Byte) : string; external;
-  function Detab(S : string; TabSize : Byte) : string; external;
+  {FPC port: ported from OPTAB.ASM}
+  function Entab(S : string; TabSize : Byte) : string;
+    {-Convert blanks in a string to tabs on spacing TabSize}
+  var
+    ILen, Ipos, OLen, SpaceCount, Op : Word;
+    Ch, QCh : Char;
+    R : string;
+    Quoted : Boolean;
+  begin
+    R[0] := #0;
+    ILen := Length(S);
+    if (TabSize = 0) or (ILen = 0) then begin
+      Entab := R;
+      Exit;
+    end;
+    Ipos := 1;
+    OLen := 0;
+    SpaceCount := 0;
+    Op := 1;
+    repeat
+      if (SpaceCount <> 0) and (Ipos mod TabSize = 1) then begin
+        {replace the trailing blanks in the output by a tab}
+        Dec(OLen, SpaceCount);
+        Dec(Op, SpaceCount);
+        R[Op] := #9;
+        Inc(Op);
+        Inc(OLen);
+        SpaceCount := 0;
+      end;
+      Ch := S[Ipos];
+      Quoted := False;
+      if Ipos <> ILen then begin
+        Inc(SpaceCount);
+        if Ch <> ' ' then begin
+          SpaceCount := 0;
+          Quoted := (Ch = #39) or (Ch = '"');
+        end;
+      end;
+      if Quoted then begin
+        QCh := Ch;
+        repeat
+          R[Op] := Ch;
+          Inc(Op);
+          Inc(OLen);
+          Inc(Ipos);
+          Ch := S[Ipos];
+          if Ipos >= ILen then
+            Break;
+          if Ch = QCh then begin
+            if Ch = #39 then
+              Break;
+            if S[Ipos-1] <> '\' then
+              Break;
+          end;
+        until False;
+      end;
+      R[Op] := Ch;
+      Inc(Op);
+      Inc(OLen);
+      Inc(Ipos);
+    until Ipos > ILen;
+    R[0] := Chr(OLen);
+    Entab := R;
+  end;
 
-  {In OPCOMP.OBJ}
-  function CompString(S1, S2 : string) : CompareType; external;
-  function CompUCString(S1, S2 : string) : CompareType; external;
-  function CompStruct(var S1, S2; Size : Word) : CompareType; external;
-  function Soundex(S : string) : string; external;
-  function MakeLetterSet(S : string) : LongInt; external;
-  function CompareLetterSets(Set1, Set2 : LongInt) : Word; external;
+  {FPC port: ported from OPTAB.ASM}
+  function Detab(S : string; TabSize : Byte) : string;
+    {-Expand tabs in a string to blanks on spacing TabSize}
+  var
+    I, OLen, NextStop : Word;
+    R : string;
+  begin
+    R[0] := #0;
+    OLen := 0;
+    if TabSize <> 0 then
+      for I := 1 to Length(S) do begin
+        if OLen >= 255 then
+          Break;
+        if S[I] = #9 then begin
+          NextStop := (OLen div TabSize + 1) * Word(TabSize);
+          if NextStop > 255 then
+            Break;
+          FillChar(R[OLen+1], NextStop-OLen, ' ');
+          OLen := NextStop;
+        end else begin
+          Inc(OLen);
+          R[OLen] := S[I];
+        end;
+      end;
+    R[0] := Chr(OLen);
+    Detab := R;
+  end;
 
-  {In OPSEARCH.OBJ}
-  function  Search(var Buffer; BufLength : Word; var Match; MatLength : Word) : Word; external;
-  function  SearchUC(var Buffer; BufLength : Word; var Match; MatLength : Word) : Word; external;
+  {FPC port: the following routines are ported from OPCOMP.ASM}
+  function CompString(S1, S2 : string) : CompareType;
+    {-Return less, equal, greater if s1<s2, s1=s2, or s1>s2}
+  var
+    I, N : Word;
+  begin
+    N := Length(S1);
+    if Length(S2) < N then
+      N := Length(S2);
+    for I := 1 to N do
+      if S1[I] <> S2[I] then begin
+        if S1[I] < S2[I] then
+          CompString := Less
+        else
+          CompString := Greater;
+        Exit;
+      end;
+    if Length(S1) = Length(S2) then
+      CompString := Equal
+    else if Length(S1) < Length(S2) then
+      CompString := Less
+    else
+      CompString := Greater;
+  end;
+
+  function CompUCString(S1, S2 : string) : CompareType;
+    {-Compare two strings in a case insensitive manner}
+  var
+    I, N : Word;
+    C1, C2 : Char;
+  begin
+    N := Length(S1);
+    if Length(S2) < N then
+      N := Length(S2);
+    for I := 1 to N do begin
+      C1 := UpcaseTbl(S1[I]);
+      C2 := UpcaseTbl(S2[I]);
+      if C1 <> C2 then begin
+        if C1 < C2 then
+          CompUCString := Less
+        else
+          CompUCString := Greater;
+        Exit;
+      end;
+    end;
+    if Length(S1) = Length(S2) then
+      CompUCString := Equal
+    else if Length(S1) < Length(S2) then
+      CompUCString := Less
+    else
+      CompUCString := Greater;
+  end;
+
+  type
+    BytesA = array[0..65534] of Byte;
+
+  function CompStruct(var S1, S2; Size : Word) : CompareType;
+    {-Compare two fixed size structures}
+  var
+    I : LongInt;
+  begin
+    CompStruct := Equal;
+    for I := 0 to LongInt(Size)-1 do
+      if BytesA(S1)[I] <> BytesA(S2)[I] then begin
+        if BytesA(S1)[I] < BytesA(S2)[I] then
+          CompStruct := Less
+        else
+          CompStruct := Greater;
+        Exit;
+      end;
+  end;
+
+  function Soundex(S : string) : string;
+    {-Return 4 character soundex of input string}
+  const
+    {codes for 'A'..'Z'; other characters (including lower case in the
+     original table, handled below) have no code}
+    Codes : array['A'..'Z'] of Char =
+      (#0, '1', '2', '3', #0, '1', '2', #0, #0, '2', '2', '4', '5',
+       '5', #0, '1', '2', '6', '2', '3', #0, '1', #0, '2', #0, '2');
+  var
+    R : string;
+    I, OLen : Word;
+    Prev, Code, Ch : Char;
+  begin
+    R := '0000';
+    if Length(S) > 0 then begin
+      Prev := UpcaseTbl(S[1]);
+      R[1] := Prev;
+      OLen := 1;
+      for I := 2 to Length(S) do begin
+        Ch := S[I];
+        if (Ch >= 'a') and (Ch <= 'z') then
+          Ch := Chr(Ord(Ch)-32);
+        if (Ch >= 'A') and (Ch <= 'Z') then
+          Code := Codes[Ch]
+        else
+          Code := #0;
+        if (Code <> #0) and (Code <> Prev) then begin
+          Inc(OLen);
+          R[OLen] := Code;
+          if OLen >= 4 then
+            Break;
+          Prev := Code;
+        end;
+      end;
+    end;
+    Soundex := R;
+  end;
+
+  function MakeLetterSet(S : string) : LongInt;
+    {-Return a bit-mapped long storing the individual letters contained in S}
+  var
+    I : Word;
+    Ch : Char;
+    L : Cardinal;
+  begin
+    L := 0;
+    for I := 1 to Length(S) do begin
+      Ch := UpcaseTbl(S[I]);
+      if (Ch >= 'A') and (Ch <= 'Z') then
+        L := L or (Cardinal(1) shl (Ord(Ch)-Ord('A')));
+    end;
+    MakeLetterSet := LongInt(L);
+  end;
+
+  function CompareLetterSets(Set1, Set2 : LongInt) : Word;
+    {-Returns the sum of the values of the letters common to Set1 and Set2}
+  var
+    Common : Cardinal;
+    I : Byte;
+    Sum : Word;
+  begin
+    Common := Cardinal(Set1) and Cardinal(Set2);
+    Sum := 0;
+    for I := 0 to 25 do
+      if (Common and (Cardinal(1) shl I)) <> 0 then
+        Inc(Sum, LetterValues[Chr(Ord('A')+I)]);
+    CompareLetterSets := Sum;
+  end;
+
+  {FPC port: the following routines are ported from OPSEARCH.ASM}
+  function Search(var Buffer; BufLength : Word; var Match; MatLength : Word) : Word;
+    {-Search through Buffer for Match. Returns number of bytes searched
+      to find Match, $FFFF if not found.}
+  var
+    I, J, Last : LongInt;
+  begin
+    Search := $FFFF;
+    if MatLength = 0 then
+      Exit;
+    Last := LongInt(BufLength)-LongInt(MatLength);
+    for I := 0 to Last do
+      if BytesA(Buffer)[I] = BytesA(Match)[0] then begin
+        J := 1;
+        while (J < MatLength) and (BytesA(Buffer)[I+J] = BytesA(Match)[J]) do
+          Inc(J);
+        if J >= MatLength then begin
+          Search := Word(I);
+          Exit;
+        end;
+      end;
+  end;
+
+  function SearchUC(var Buffer; BufLength : Word; var Match; MatLength : Word) : Word;
+    {-Search through Buffer for Match, CASE-INSENSITIVE}
+  var
+    I, J, Last : LongInt;
+    First : Char;
+  begin
+    SearchUC := $FFFF;
+    if MatLength = 0 then
+      Exit;
+    First := UpcaseTbl(Chr(BytesA(Match)[0]));
+    Last := LongInt(BufLength)-LongInt(MatLength);
+    for I := 0 to Last do
+      if UpcaseTbl(Chr(BytesA(Buffer)[I])) = First then begin
+        J := 1;
+        while (J < MatLength) and
+              (UpcaseTbl(Chr(BytesA(Buffer)[I+J])) = UpcaseTbl(Chr(BytesA(Match)[J]))) do
+          Inc(J);
+        if J >= MatLength then begin
+          SearchUC := Word(I);
+          Exit;
+        end;
+      end;
+  end;
+
   procedure ReplacePrim(var Buffer; BufLength, Posn, SrcLen : Word;
-                        var Repl  ; RepLength : Word); external;
+                        var Repl  ; RepLength : Word);
+    {-Replace the SrcLen bytes of Buffer at Posn with the RepLength bytes
+      in Repl}
+  var
+    Tail : LongInt;
+  begin
+    if SrcLen = 0 then
+      Exit;
+    {FPC port: the original assembler lost the last RepLength-SrcLen bytes
+     when the buffer expanded; the tail is now moved intact}
+    Tail := LongInt(BufLength)-Posn-SrcLen;
+    if (SrcLen <> RepLength) and (Tail > 0) then
+      Move(BytesA(Buffer)[Posn+SrcLen], BytesA(Buffer)[Posn+RepLength], Tail);
+    if RepLength > 0 then
+      Move(Repl, BytesA(Buffer)[Posn], RepLength);
+  end;
 
-  {In OPBM.OBJ}
-  procedure BMMakeTable(MatchString : string; var BT : BTable); external;
-  function BMSearch(var Buffer; BufLength : Word; BT : BTable; MatchString : string) : Word; external;
-  function BMSearchUC(var Buffer; BufLength : Word; BT : BTable; MatchString : string) : Word; external;
+  {FPC port: the following routines are ported from OPBM.ASM}
+  procedure BMMakeTable(MatchString : string; var BT : BTable);
+    {-Build Boyer-Moore link table}
+  var
+    I : LongInt;
+  begin
+    FillChar(BT, SizeOf(BT), Length(MatchString));
+    for I := 1 to Length(MatchString)-1 do
+      BT[Ord(MatchString[I])] := Length(MatchString)-I;
+  end;
+
+  function BMSearchPrim(var Buffer; BufLength : Word; var BT : BTable;
+                        MatchString : string; UC : Boolean) : Word;
+  var
+    Len, Pos, J : LongInt;
+    C, Last : Byte;
+  begin
+    BMSearchPrim := $FFFF;
+    Len := Length(MatchString);
+    if Len = 0 then
+      Exit;
+    Last := Ord(MatchString[Len]);
+    Pos := Len-1;                    {index of last char of current window}
+    while Pos < BufLength do begin
+      C := BytesA(Buffer)[Pos];
+      if UC then
+        C := Ord(UpcaseTbl(Chr(C)));
+      if C = Last then begin
+        J := 1;
+        while J < Len do begin
+          C := BytesA(Buffer)[Pos-J];
+          if UC then
+            C := Ord(UpcaseTbl(Chr(C)));
+          if C <> Ord(MatchString[Len-J]) then
+            Break;
+          Inc(J);
+        end;
+        if J >= Len then begin
+          BMSearchPrim := Word(Pos-Len+1);
+          Exit;
+        end;
+        C := Last;
+      end;
+      Inc(Pos, BT[C]);
+    end;
+  end;
+
+  function BMSearch(var Buffer; BufLength : Word; BT : BTable; MatchString : string) : Word;
+    {-Search Buffer for MatchString. Returns number of bytes searched to
+      find MatchString, $FFFF if not found}
+  begin
+    BMSearch := BMSearchPrim(Buffer, BufLength, BT, MatchString, False);
+  end;
+
+  function BMSearchUC(var Buffer; BufLength : Word; BT : BTable; MatchString : string) : Word;
+    {-Search Buffer for MatchString, CASE-INSENSITIVE.
+      Assumes MatchString is already in uppercase.}
+  begin
+    BMSearchUC := BMSearchPrim(Buffer, BufLength, BT, MatchString, True);
+  end;
 
   function StringToHeap(S : string) : StringPtr;
     {-Allocate space for s and return pointer}
@@ -1284,13 +1694,10 @@ Done:
     P : Pointer;
   begin
     L := Succ(Word(Length(S)));
-    if MaxAvail < L then
-      StringToHeap := nil
-    else begin
-      GetMem(P, L);
-      MoveFast(S, P^, L); {!!.01}
-      StringToHeap := P;
-    end;
+    {FPC port: MaxAvail does not exist; GetMem raises a run-time error on failure}
+    GetMem(P, L);
+    MoveFast(S, P^, L); {!!.01}
+    StringToHeap := P;
   end;
 
   function StringFromHeap(P : StringPtr) : string;
@@ -1318,7 +1725,9 @@ Done:
     for I := Length(Name) downto 1 do
       if (Name[I] = '.') and (DotPos = 0) then
         DotPos := I;
-    HasExtension := (DotPos > 0) and (Pos('\', Copy(Name, Succ(DotPos), 64)) = 0);
+    HasExtension := (DotPos > 0) and
+      (Pos('\', Copy(Name, Succ(DotPos), 64)) = 0) and
+      (Pos('/', Copy(Name, Succ(DotPos), 64)) = 0);
   end;
 
   function DefaultExtension(Name : string; Ext : ExtStr) : string;
@@ -1398,8 +1807,8 @@ Done:
     else if I = 1 then
       {Either the root directory of default drive or invalid pathname}
       JustPathname := PathName[1]
-    else if (PathName[I] = '\') then begin
-      if PathName[Pred(I)] = ':' then
+    else if (PathName[I] = '\') or (PathName[I] = '/') then begin
+      if (PathName[Pred(I)] = ':') and (PathName[I] = '\') then
         {Root directory of a drive, leave trailing backslash}
         JustPathname := Copy(PathName, 1, I)
       else
@@ -1416,7 +1825,7 @@ Done:
     if DirName[Length(DirName)] in DosDelimSet then
       AddBackSlash := DirName
     else
-      AddBackSlash := DirName+'\';
+      AddBackSlash := DirName+DirSepChar;
   end;
 
   function CleanFileName(FileName : string) : string;
@@ -1474,31 +1883,9 @@ Done:
 
   function FullPathName(FName : string) : string;
     {-Given FName (known to exist), return a full pathname}
-  var
-    CurDir : string[64];
-    Cpos : Byte;
   begin
-    Cpos := Pos(':', FName);
-    if Cpos <> 0 then begin
-      {Drive letter specified}
-      if FName[Succ(Cpos)] = '\' then
-        {Complete path already specified}
-        FullPathName := FName
-      else begin
-        {Drive specified, but incomplete path}
-        GetDir(Pos(Upcase(FName[1]), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'), CurDir);
-        FullPathName := AddBackSlash(CurDir)+Copy(FName, Succ(Cpos), 100);
-      end;
-    end else begin
-      {No drive specified}
-      GetDir(0, CurDir);
-      if FName[1] = '\' then
-        {Complete path but no drive}
-        FullPathName := Copy(CurDir, 1, 2)+FName
-      else
-        {No drive, incomplete path}
-        FullPathName := AddBackSlash(CurDir)+FName;
-    end;
+    {FPC port: the DOS GetDir/drive logic is replaced by Dos.FExpand}
+    FullPathName := FExpand(FName);
   end;
 
   procedure SetDefaultUpcase;   {!!.20}
@@ -1506,97 +1893,13 @@ Done:
     UCTable := DefUCTable;
   end;
 
-  function FixupUCChar(C : Char) : Char;   {!!.20}
-{$IFDEF PMode}
-  var
-    DR : DpmiRegisters;
-    W : Word;
-  begin
-    FillChar(DR, SizeOf(DR), 0);
-    with DR do begin
-  {$IFDEF Windows}
-      drAX := Word(C);
-      drCS := OS(UpcaseFunc).S;
-      drIP := OS(UpcaseFunc).O;
-      W := CallFarRealModeProc(0, nil, DR);
-      FixupUCChar := Chr(drAX);
-  {$ELSE}
-      AX := Word(C);
-      CS := OS(UpcaseFunc).S;
-      IP := OS(UpcaseFunc).O;
-      W := CallFarRealModeProc(0, nil, DR);
-      FixupUCChar := Chr(AX);
-  {$ENDIF}
-    end;
-{$ELSE}
-  begin
-    Inline(
-      $8A/$46/<C/            {mov al,[bp+<C]}
-      $FF/$1E/>UpcaseFunc/   {call dword ptr [>UpcaseFunc]}
-      $88/$46/<FixupUCChar); {mov [bp+<FixupUCChar],al}
-{$ENDIF}
-  end;
-
-{$IFDEF PMode}
-  procedure SetInternationalUpcasePrimPM;
-  label
-    Skip;
-  type
-    HiLo = record
-      LoWord, HiWord : Word;
-    end;
-  var
-    R : DPMIRegisters;
-    L : LongInt;
-  begin
-    FillChar(R, SizeOf(R), 0);
-{$IFDEF Windows}
-    R.drAX := $3000;
-    if SimulateRealModeInt($21, R) <> 0 then exit;
-    {R.drAX := R.drAX or $00FF;}       {!!.22}
-    {if R.drAX >= 2 then exit;}        {!!.22}
-    if lo(R.drAX) < 3 then exit;       {!!.22}
-
-    L := GlobalDosAlloc(34);
-    R.drAX := $3800;
-    R.drDX := 0;
-    R.drDS := HiLo(L).HiWord;
-    if SimulateRealModeInt($21, R) <> 0 then goto Skip;
-    Move(Ptr(HiLo(L).LoWord, $12)^, Pointer(UpcaseFunc), 4);
-{$ELSE}
-    R.ax := $3000;
-    if SimulateRealModeInt($21, R) <> 0 then exit;
-    {R.ax := R.ax or $00FF;}           {!!.22}
-    {if R.ax >= 2 then exit;}          {!!.22}
-    if lo(R.ax) < 3 then exit;         {!!.22}
-
-    L := GlobalDosAlloc(34);
-    R.ax := $3800;
-    R.dx := 0;
-    R.ds := HiLo(L).HiWord;
-    if SimulateRealModeInt($21, R) <> 0 then goto Skip;
-    Move(Ptr(HiLo(L).LoWord, $12)^, Pointer(UpcaseFunc), 4);
-{$ENDIF}
-
-Skip:
-    L := GlobalDosFree(HiLo(L).LoWord);
-  end;
-{$ENDIF}
-
   procedure SetInternationalUpcase;  {!!.20}
-  var
-    B : Byte;
+    {FPC port: stubbed because the DOS country-information upcase routine
+     (INT 21h/3800h, called via real-mode far pointer) does not exist on
+     Windows/Linux; the built-in CP437 table is used instead}
   begin
     SetDefaultUpcase;
     UpcaseFunc := Nil;
-{$IFDEF PMode}
-    SetInternationalUpcasePrimPM;
-{$ELSE}
-    SetInternationalUpcasePrim;
-{$ENDIF}
-    if UpcaseFunc <> nil then
-      for B := 128 to 165 do
-        UCTable[B] := FixupUCChar(Chr(B));
   end;
 
 type                                                           {!!.30}
@@ -1611,7 +1914,6 @@ type                                                           {!!.30}
                          FindFunc : FinditFunc; All : Boolean) : Word;
   type
     SearchBuf = array[0..$FFF0] of Byte;
-    SearchPtr = ^SearchBuf;
 
   var
     FoundPos    : Word;
@@ -1620,14 +1922,13 @@ type                                                           {!!.30}
     BufferDelta : Integer;
     SearchStart : Word;
     Done        : Boolean;
-    SBuf        : SearchBuf absolute Buffer;
 
   begin
     { calculate how much the buffer will grow or shrink with each replacement }
     BufferDelta := RepLength - MatLength;
 
     NewLength := BufLength;
-    FoundPos  := FindFunc(SBuf, NewLength, Match, MatLength);
+    FoundPos  := FindFunc(Buffer, NewLength, Match, MatLength);
     Done      := False;
     ReplaceIt := $FFFF;
     while not Done and (FoundPos <> $FFFF) do begin
@@ -1641,11 +1942,11 @@ type                                                           {!!.30}
       if not All then
         Done := True;
 
-      ReplacePrim(SBuf, NewLength, FoundPos, MatLength, Repl, RepLength);
+      ReplacePrim(Buffer, NewLength, FoundPos, MatLength, Repl, RepLength);
       NewLength   := TempLength;
       SearchStart := FoundPos + RepLength;
       TempPos     :=
-        FindFunc( SBuf[SearchStart],
+        FindFunc( SearchBuf(Buffer)[SearchStart],
                   NewLength - SearchStart,
                   Match,
                   MatLength);

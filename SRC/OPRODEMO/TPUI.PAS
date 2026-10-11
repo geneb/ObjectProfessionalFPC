@@ -6,7 +6,7 @@
 {*                 All rights reserved.                  *}
 {*********************************************************}
 
-{$I OPDEFINE.INC}
+{$I opdefine.inc}
 
 {***************************************************************************
  This unit requires that OPDEFINE.INC activate the following defines:
@@ -63,15 +63,15 @@ uses
   OpPick,
   OpDir;
 
-{$I TPUI.ICD}      {configuration data}
+{$I tpui.icd}      {configuration data}
 
 const
   {frame stuff}
-  SliderChar       = '²';
-  ScrollBarChar    = '°';
-  BackdropChar     = '±';
+  SliderChar       = #$B2;
+  ScrollBarChar    = #$B0;
+  BackdropChar     = #$B1;
   BackdropAttr     = $07;
-  TpUiFrame        = 'ÕÔ¸¾ÍÍ³³';
+  TpUiFrame        = #$D5#$D4#$B8#$BE#$CD#$CD#$B3#$B3;
   Step             = 1;
 
   {status line}
@@ -373,33 +373,9 @@ implementation
   {!!.10} {Various changes for Heap6}
   function FreeListUsage : Word;
     {-Returns amount of free list space in use}
-{$IFDEF Heap6}
-  type
-    PFreeRec = ^TFreeRec;
-    TFreeRec = record
-                 Next : PFreeRec;
-                 Size : Pointer;
-               end;
-  var
-    PF : PFreeRec;
-    Size : LongInt;
-{$ENDIF}
   begin
-{$IFDEF Heap6}
-    Size := 0;
-    PF := FreeList;
-    while PF <> HeapPtr do begin
-      inc(Size, 8);
-      PF := PF^.Next;
-    end;
-    FreeListUsage := Size;
-{$ELSE}
-    with OS(FreePtr) do
-       if O = 0 then
-         FreeListUsage := 0
-       else
-         FreeListUsage := $10000-O;
-{$ENDIF}
+    {FPC port: the TP free list does not exist}
+    FreeListUsage := 0;
   end;
 {$ENDIF}                {!!.21}
 
@@ -970,18 +946,18 @@ implementation
 
       {add window number/local menu button}
       if TWidth <> 0 then begin
-        AddCustomHeader('¸',  frTL,   +2, +0, FrameColor, FrameMono);
+        AddCustomHeader(#$B8,  frTL,   +2, +0, FrameColor, FrameMono);
         AddCustomHeader('#',  frTL,   +3, +0, HotSpotColor, HotSpotMono);
         udmWinNum := GetLastHeaderIndex;
-        AddCustomHeader('Õ',  frTL,   +4, +0, FrameColor, FrameMono);
+        AddCustomHeader(#$D5,  frTL,   +4, +0, FrameColor, FrameMono);
         AddHotRegion(frTL, hsRegion1, +3, +0, 1, 1);               {Local menu}
       end;
 
       if wOptionsAreOn(wResizeable) then begin
         {add zoom button}
-        AddCustomHeader('¸',  frTR,   -4, +0, FrameColor, FrameMono);
+        AddCustomHeader(#$B8,  frTR,   -4, +0, FrameColor, FrameMono);
         AddCustomHeader(^R,   frTR,   -3, +0, HotSpotColor, HotSpotMono);
-        AddCustomHeader('Õ',  frTR,   -2, +0, FrameColor, FrameMono);
+        AddCustomHeader(#$D5,  frTR,   -2, +0, FrameColor, FrameMono);
         AddHotRegion(frTR, hsRegion2, -3, +0, 1, 1);                   {Zoom}
 
         {add resize button}
@@ -1444,8 +1420,5 @@ begin
   DefWindowFrame   := TpUiFrame;
   DefaultColorSet  := TpUiColors;
 
-{$IFNDEF Heap6} {!!.10}
-  {make sure there's always some room for the free list}  {!!.03}
-  FreeMin := 128;                                         {!!.03}
-{$ENDIF}        {!!.10}
+{FPC port: FreeMin (TP free list reserve) does not exist}
 end.

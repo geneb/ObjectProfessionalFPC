@@ -1,4 +1,4 @@
-{$IFDEF Windows}                                                      {!!.20}
+{$IFDEF OPWinTP}                                                      {!!.20}
   !! ERROR: This unit is not compatible with Windows applications !!  {!!.20}
 {$ENDIF}                                                              {!!.20}
 
@@ -8,7 +8,7 @@
 
 {$S-,R-,V-,I-,B-,F-,O-,A-}
 
-{$I OPDEFINE.INC}
+{$I opdefine.inc}
 
 {*********************************************************}
 {*                    OPSWAP.PAS 1.30                    *}
@@ -19,6 +19,8 @@
 {*********************************************************}
 
 unit OpSwap;
+  { FPC port: stubbed because TSR program swapping has no equivalent on
+    Windows/Linux. }
 
 interface
 
@@ -52,43 +54,32 @@ implementation
 uses
   OpSwap1;
 
-  {$L OPSWAP.OBJ}
-  function SwapOut : Boolean; external;
-  (* procedure FirstToSave; external; !!.02 *)
-  procedure SwapProgIn; external;
-  procedure SwapProgOut; external;
+{ FPC port: stubbed because the resident swap kernel (OPSWAP.ASM/OPSWAPI.ASM:
+  ISR handlers, program swap to EMS/XMS/disk, code-segment data area) cannot
+  exist on Windows/Linux.  SwapOut reports failure, Intercom returns Nil and
+  CSRelData is an empty placeholder.  SetPopTicker works on the heap-based
+  CSSwapData of OpSwap1 but nothing ever fires a popup. }
 
-  {$F+}
-  procedure CSRelData; external;       {not a procedure, just a label}
-  function Intercom(Func : Byte) : Pointer; external;
-  procedure SwappedFlag; external;
-  procedure SwappedOutFlag; external;
+  function SwapOut : Boolean;
+  begin
+    { FPC port: stubbed because there is no program image swapping }
+    SwapOut := False;
+  end;
 
-  {see OPSWAPI.ASM for documentation}
-  procedure Int9; external;
-  procedure Int28; external;
-  procedure Int8; external;
-  procedure Int5; external;
-  procedure Int10; external;
-  procedure Int13; external;
-  procedure Int14; external;
-  procedure Int16; external;
-  procedure Int17; external;
-  procedure Int25; external;
-  procedure Int26; external;
-  procedure NopISR; external;
+  procedure CSRelData;
+  begin
+    { FPC port: was a label in the code segment; kept for interface only }
+  end;
 
-  procedure InitCSPops; external;
-  {$IFDEF SupportXms}
-  procedure UsingXms; external;
-  {$ELSE}
-  procedure NotUsingXms; external;
-  {$ENDIF}
+  function Intercom(Func : Byte) : Pointer;
+  begin
+    { FPC port: stubbed because there is no resident kernel to query }
+    Intercom := nil;
+  end;
 
-  {$F+}
   procedure SetPopTicker(TimeOut : Word);
   begin
-    with CSSwapDataPtr(@CSRelData)^ do begin
+    with CSSwapData^ do begin
       if PopupsEnabled then begin
         if not PopupInUse[CmdEntryHandle] then begin
           InterruptsOff;
@@ -99,12 +90,20 @@ uses
       end;
     end;
   end;
-  {$F-}
+
+{$IFDEF SupportXms}
+  procedure UsingXms;
+  begin
+    { FPC port: stubbed because XMS swapping does not exist }
+  end;
+{$ELSE}
+  procedure NotUsingXms;
+  begin
+    { FPC port: stubbed because XMS swapping does not exist }
+  end;
+{$ENDIF}
 
 begin
-  {prepare for popups}
-  CSSwapData  := @CSRelData;
   IntercomPtr := Intercom;
-  InitCSPops;
   InitCSSwapData;
 end.

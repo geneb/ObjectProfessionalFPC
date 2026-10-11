@@ -74,4 +74,3 @@ begin
   SSel.Erase;
   SSel.Done;
 end.
-

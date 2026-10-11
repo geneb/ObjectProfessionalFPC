@@ -567,6 +567,7 @@ var
           EnableConsoleMouse;
           {$ENDIF}
           MouseStarted := True;
+          PollHook := PollMouseEvents;
           MouseInstalled := True;
           if N > 3 then
             N := 3;

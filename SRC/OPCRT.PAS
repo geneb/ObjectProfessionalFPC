@@ -612,6 +612,10 @@ procedure FlushScreen;
     Write/Read through the CRT text file and at exit. Call it yourself
     before long computations or when waiting without polling the keyboard.}
 
+procedure ScreenModified;
+  {-Note that the screen buffer was changed directly (for example by the
+    mouse cursor) so the next FlushScreen copies it to the console}
+
 procedure DoneCrt;
   {-Restore the console (keyboard, video mode, code page). Called
     automatically from an exit procedure; safe to call more than once.}
@@ -1224,6 +1228,11 @@ function WinBeep(Freq, Dur : LongWord) : LongInt;
     end
     else if KbdOK then
       Ev := Keyboard.GetKeyEvent;
+  end;
+
+  procedure ScreenModified;
+  begin
+    Dirty := True;
   end;
 
   function NativeReadKeyWord : Word;

@@ -220,6 +220,7 @@ var
   function MouseEventsPending : Boolean;
     {-Return True if mouse events are available to read}
   begin
+    PollMouseEvents;
     PollTimerTicks;
     MouseEventsPending := (QueueTail <> QueueHead);
   end;
@@ -509,6 +510,7 @@ var
         cpGetKey := CommandProcessor.cpGetKey;
         Exit;
       end;
+      Delay(1);
     until False;
   end;
 

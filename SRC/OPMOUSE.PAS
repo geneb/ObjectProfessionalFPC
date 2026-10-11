@@ -247,6 +247,9 @@ procedure ShowMousePrim(MouseState : Boolean);
 
   {==========================================================================}
 
+procedure PollMouseEvents;
+  {-FPC port: pump pending console mouse events into the OpMouse state}
+
 implementation
 
 uses
@@ -257,6 +260,44 @@ type
   CellArray = array[0..65534] of Word;
   CellPtr = ^CellArray;
   EventProc = procedure;
+
+{$IFDEF WINDOWS}
+function GetStdHandle(nStdHandle : LongWord) : PtrUInt;
+  stdcall; external 'kernel32' name 'GetStdHandle';
+function GetConsoleMode(H : PtrUInt; var Mode : LongWord) : LongInt;
+  stdcall; external 'kernel32' name 'GetConsoleMode';
+function SetConsoleMode(H : PtrUInt; Mode : LongWord) : LongInt;
+  stdcall; external 'kernel32' name 'SetConsoleMode';
+
+var
+  SavedConMode : LongWord;
+  ConModeSaved : Boolean;
+
+  procedure EnableConsoleMouse;
+    {-Quick-edit mode makes Windows swallow mouse events; turn it off}
+  var
+    H : PtrUInt;
+    M : LongWord;
+  begin
+    H := GetStdHandle($FFFFFFF6);
+    if (H <> 0) and (H <> High(PtrUInt)) and (GetConsoleMode(H, M) <> 0) then begin
+      if not ConModeSaved then begin
+        SavedConMode := M;
+        ConModeSaved := True;
+      end;
+      M := (M or $90) and not $40;   {EXTENDED_FLAGS, MOUSE_INPUT, no QUICK_EDIT}
+      if SetConsoleMode(H, M) = 0 then ;
+    end;
+  end;
+
+  procedure RestoreConsoleMode;
+  begin
+    if ConModeSaved then begin
+      if SetConsoleMode(GetStdHandle($FFFFFFF6), SavedConMode) = 0 then ;
+      ConModeSaved := False;
+    end;
+  end;
+{$ENDIF}
 
 var
   SaveExitProc : Pointer;
@@ -294,8 +335,10 @@ var
       Drawn := False;
       Cells := CellPtr(VideoBuffer);
       if (Cells <> nil) and (DrawnIdx < CellCount) then
-        if Cells^[DrawnIdx] = DrawnCell then
+        if Cells^[DrawnIdx] = DrawnCell then begin
           Cells^[DrawnIdx] := SavedCell;
+          ScreenModified;
+        end;
     end;
   end;
 
@@ -323,6 +366,7 @@ var
       New := (Old and DefaultScreenMask) xor DefaultCursorMask;
     if New <> Old then begin
       Cells^[Idx] := New;
+      ScreenModified;
       Drawn := True;
       DrawnIdx := Idx;
       DrawnCell := New;
@@ -439,6 +483,11 @@ var
     InPoll := False;
   end;
 
+  procedure PollMouseEvents;
+  begin
+    PollEvents;
+  end;
+
   procedure WaitTick;
     {-Replacement for INT $28: yield while waiting for a mouse event}
   begin
@@ -514,6 +563,9 @@ var
         N := Mouse.DetectMouse;
         if N > 0 then begin
           Mouse.InitMouse;
+          {$IFDEF WINDOWS}
+          EnableConsoleMouse;
+          {$ENDIF}
           MouseStarted := True;
           MouseInstalled := True;
           if N > 3 then
@@ -1010,6 +1062,9 @@ var
       MouseRoutine := nil;
       if MouseStarted then begin
         Mouse.DoneMouse;
+        {$IFDEF WINDOWS}
+        RestoreConsoleMode;
+        {$ENDIF}
         MouseStarted := False;
       end;
     end;

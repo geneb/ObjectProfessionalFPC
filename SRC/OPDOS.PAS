@@ -843,7 +843,7 @@ const
     DosError := 0;
     {$IFDEF UNIX}
     if UseSecond and (Command <> '') then begin
-      if Unix.Shell(Command) < 0 then
+      if fpSystem(Command) < 0 then
         DosError := 2;
     end
     else

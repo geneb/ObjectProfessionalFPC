@@ -18,8 +18,8 @@ for f in *.pas; do
 done
 
 echo "=== Demos ==="
-for f in OPRODEMO/*.pas; do
-  (cd OPRODEMO && $FPC -P$CPU -Mtp -Sg -FU"../$UNITS" -FE"../$BIN" -Fu.. -Fi.. -Fi. "$(basename "$f")" >/dev/null) \
+for f in oprodemo/*.pas; do
+  (cd oprodemo && $FPC -P$CPU -Mtp -Sg -FU"../$UNITS" -FE"../$BIN" -Fu.. -Fi.. -Fi. "$(basename "$f")" >/dev/null) \
     || { echo "FAILED: $f"; failed=$((failed+1)); }
 done
 

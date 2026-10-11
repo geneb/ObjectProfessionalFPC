@@ -25,11 +25,11 @@ From what I can determine, v1.30 is the last version of Object Professional that
 ## Building
 This port builds with Free Pascal 3.2.2 (`fpc`) on Windows and Linux; no assembler is needed (the .ASM routines were ported to Pascal).  Everything is compiled with `-Mtp -Sg`.
 
-From the SRC directory run `build.cmd` (Windows) or `./build.sh` (Linux; `make` also works).  An optional output directory may be given as an argument; the default is `out\win64` / `out/x86_64-<os>`, with units in `units` and the demo programs in `bin`.  Builds are **64-bit (x86_64) by default**; set `CPU=i386` for a 32-bit build (output `out\win32`). Set the `FPC` environment variable to use a specific compiler. (`MemOpLibrary` is not available in this port.)
+From the src directory run `build.cmd` (Windows) or `./build.sh` (Linux; `make` also works).  An optional output directory may be given as an argument; the default is `out\win64` / `out/x86_64-<os>`, with units in `units` and the demo programs in `bin`.  Builds are **64-bit (x86_64) by default**; set `CPU=i386` for a 32-bit build (output `out\win32`). Set the `FPC` environment variable to use a specific compiler. (`MemOpLibrary` is not available in this port.)
 
-The file SRC\OPDEFINE.INC has settings that can be changed in order to affect how Object Professional is built and functions.  It would be worth your time to peruse that file - note that unless you know **why** you're going to change something, you probably should leave it the default.
+The file src\opdefine.inc has settings that can be changed in order to affect how Object Professional is built and functions.  It would be worth your time to peruse that file - note that unless you know **why** you're going to change something, you probably should leave it the default.
 
-Features that cannot exist in a 32-bit portable build are stubbed and marked with `{ FPC port: ... }` comments: EMS, XMS, DPMI, TSR/pop-up support and interrupt hooks, direct BIOS data area access, and direct UART/video hardware access.  The TSR demos (SMACS, DESKPOP, PHMAIN/POPHELP, PTIME, PSMAIN, ...) build and run only as normal foreground programs, or print a message that they need MS-DOS TSR facilities.  The old DOS Makefile (SRC\OPRO.MAK) is kept for reference only.
+Features that cannot exist in a 32-bit portable build are stubbed and marked with `{ FPC port: ... }` comments: EMS, XMS, DPMI, TSR/pop-up support and interrupt hooks, direct BIOS data area access, and direct UART/video hardware access.  The TSR demos (SMACS, DESKPOP, PHMAIN/POPHELP, PTIME, PSMAIN, ...) build and run only as normal foreground programs, or print a message that they need MS-DOS TSR facilities.  The old DOS Makefile (src\opro.mak) is kept for reference only.
 ## Documentation
 
 The Object Professional documentation is spread across three volumes:

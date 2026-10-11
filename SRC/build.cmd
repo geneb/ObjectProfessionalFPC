@@ -1,5 +1,5 @@
 @echo off
-rem Build Object Professional (FPC 3.2.2, Windows). Run from the SRC directory.
+rem Build Object Professional (FPC 3.2.2, Windows). Run from the src directory.
 rem Usage: build.cmd [outdir]     (default: out\win64 for units, out\win64\bin for demos)
 rem Default target is 64-bit (x86_64-win64). For 32-bit:  set CPU=i386 & build.cmd
 setlocal enabledelayedexpansion
@@ -13,7 +13,7 @@ set UNITS=%OUT%\units
 set BIN=%OUT%\bin
 if not exist "%UNITS%" mkdir "%UNITS%"
 if not exist "%BIN%" mkdir "%BIN%"
-set OPTS=%TGT% -Mtp -Sg -FU"%UNITS%" -Fu. -Fi. -Fi.\OPRODEMO
+set OPTS=%TGT% -Mtp -Sg -FU"%UNITS%" -Fu. -Fi. -Fi.\oprodemo
 set FAILED=0
 
 echo === Library units (%CPU%-%TARGETOS%) ===
@@ -23,10 +23,10 @@ for %%F in (*.pas) do (
 )
 
 echo === Demos ===
-pushd OPRODEMO
+pushd oprodemo
 for %%F in (*.pas) do (
   %FPC% %TGT% -Mtp -Sg -FU"..\%UNITS%" -FE"..\%BIN%" -Fu.. -Fi.. -Fi. %%F >nul
-  if errorlevel 1 (echo FAILED: OPRODEMO\%%F & set /a FAILED+=1)
+  if errorlevel 1 (echo FAILED: oprodemo\%%F & set /a FAILED+=1)
 )
 popd
 
